@@ -55,9 +55,12 @@ class FishingGUI:
         self._mode_var: Optional[tk.StringVar] = None
         self._roi_var: Optional[tk.StringVar] = None
         self._params_var: Optional[tk.StringVar] = None
+        self._color_var: Optional[tk.StringVar] = None   # 当前目标颜色 RGB
 
         # 按钮引用 (用于更新文字/状态)
         self._btn_toggle: Optional[ttk.Button] = None
+        # 颜色预览画布 (显示当前 target_color 的色块)
+        self._color_preview: Optional[tk.Canvas] = None
 
     # ---------------- 构建界面 ----------------
 
@@ -74,6 +77,7 @@ class FishingGUI:
         self._mode_var = tk.StringVar(value="")
         self._roi_var = tk.StringVar(value="")
         self._params_var = tk.StringVar(value="")
+        self._color_var = tk.StringVar(value="")
 
         # 窗口关闭按钮 -> 退出程序
         root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -95,6 +99,18 @@ class FishingGUI:
         ttk.Label(info_frame, textvariable=self._mode_var, foreground="gray").pack(anchor="w")
         ttk.Label(info_frame, textvariable=self._roi_var, foreground="gray").pack(anchor="w")
         ttk.Label(info_frame, textvariable=self._params_var, foreground="gray").pack(anchor="w")
+
+        # 颜色显示行：色块预览 + RGB 数值
+        color_frame = ttk.Frame(info_frame)
+        color_frame.pack(anchor="w", pady=(2, 0))
+        self._color_preview = tk.Canvas(
+            color_frame, width=20, height=20, highlightthickness=1,
+            highlightbackground="gray",
+        )
+        self._color_preview.pack(side="left")
+        ttk.Label(
+            color_frame, textvariable=self._color_var, foreground="gray",
+        ).pack(side="left", padx=(6, 0))
 
         # ---- 操作按钮区 ----
         btn_frame = ttk.LabelFrame(frm, text="操作", padding=8)
@@ -331,6 +347,21 @@ class FishingGUI:
         self._params_var.set(
             f"咬钩: 右键单击收竿 | 抛竿延迟 {fish.recast_delay_min_ms}~{fish.recast_delay_max_ms}ms"
         )
+
+        # 颜色：显示当前 target_color 的 RGB 值 + 色块预览
+        tc = det.target_color  # (r, g, b)
+        r, g, b = int(tc[0]), int(tc[1]), int(tc[2])
+        if det.use_color_detection:
+            self._color_var.set(f"目标颜色: RGB({r}, {g}, {b})  容差 ±{det.color_tolerance}")
+        else:
+            self._color_var.set(f"目标颜色: RGB({r}, {g}, {b})  (颜色检测未启用)")
+        # 更新色块
+        if self._color_preview is not None:
+            color_hex = f"#{r:02x}{g:02x}{b:02x}"
+            self._color_preview.delete("all")
+            self._color_preview.create_rectangle(
+                0, 0, 20, 20, fill=color_hex, outline=""
+            )
 
     def destroy(self) -> None:
         """销毁窗口"""

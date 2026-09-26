@@ -22,9 +22,10 @@
 
 ## 安装与启动
 
-在 PowerShell 的项目根目录中安装依赖并启动：
+在仓库根目录打开 PowerShell，进入 `AutoFishing` 目录后安装依赖并启动：
 
 ```powershell
+cd AutoFishing
 python -m pip install -r requirements.txt
 python main.py
 ```
@@ -95,6 +96,7 @@ F10 截取模板失败时，颜色检测仍会保留并启用。请在咬钩提�
 ## 项目结构
 
 ```text
+AutoFishing/
 ├── main.py                 # 程序入口与应用协调
 ├── gui.py                  # Tkinter 控制面板
 ├── config.py               # 配置加载、保存与校验

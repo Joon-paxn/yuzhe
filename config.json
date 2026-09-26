@@ -13,11 +13,11 @@
         "use_template_matching": false,
         "template_match_threshold": 0.8,
         "use_color_detection": true,
-        "target_color": [
-            252,
-            252,
-            252
-        ],
+        "target_color": {
+            "r": 252,
+            "g": 252,
+            "b": 252
+        },
         "color_tolerance": 30,
         "white_threshold": 235,
         "white_pixel_threshold": 400,
@@ -36,9 +36,9 @@
         "pick_color": "f11"
     },
     "roi": {
-        "x": 0.46642561983471076,
-        "y": 0.5145985401459854,
-        "width": 0.07747933884297521,
-        "height": 0.06751824817518248
+        "x": 0.4635416666666667,
+        "y": 0.4981481481481482,
+        "width": 0.07395833333333333,
+        "height": 0.09907407407407408
     }
 }

@@ -120,11 +120,15 @@ def load_config(config_path: str) -> AppConfig:
     # 深度合并：用户配置覆盖默认配置，缺失字段使用默认值
     merged_dict = _deep_merge(default_dict, user_dict)
 
+    # 规范化 target_color：支持对象 {r,g,b} 和数组 [r,g,b] 两种格式
+    det_dict = merged_dict.get("detection", {})
+    det_dict["target_color"] = _normalize_color(det_dict.get("target_color"))
+
     try:
         config = AppConfig(
             window=WindowConfig(**merged_dict.get("window", {})),
             fishing=FishingConfig(**merged_dict.get("fishing", {})),
-            detection=DetectionConfig(**merged_dict.get("detection", {})),
+            detection=DetectionConfig(**det_dict),
             hotkeys=HotkeyConfig(**merged_dict.get("hotkeys", {})),
             roi=RoiConfig(**merged_dict.get("roi", {})),
         )
@@ -136,9 +140,37 @@ def load_config(config_path: str) -> AppConfig:
     return config
 
 
+def _normalize_color(value: Any) -> Tuple[int, int, int]:
+    """
+    将配置中的颜色值规范化为 (r, g, b) 元组。
+    支持两种输入格式：
+      - 对象: {"r": 252, "g": 252, "b": 252}
+      - 数组: [252, 252, 252]
+    格式错误时返回默认白色。
+    """
+    if isinstance(value, dict):
+        r = value.get("r")
+        g = value.get("g")
+        b = value.get("b")
+        if all(isinstance(v, int) and 0 <= v <= 255 for v in (r, g, b)):
+            return (int(r), int(g), int(b))
+    elif isinstance(value, (list, tuple)) and len(value) == 3:
+        if all(isinstance(v, int) and 0 <= v <= 255 for v in value):
+            return (int(value[0]), int(value[1]), int(value[2]))
+    return (255, 255, 255)
+
+
 def save_config(config_path: str, config: AppConfig) -> None:
-    """保存配置到 JSON 文件"""
+    """保存配置到 JSON 文件，颜色以 RGB 对象格式保存"""
     data = asdict(config)
+    # 将 target_color 从元组转为 RGB 对象格式 {r, g, b}
+    tc = data.get("detection", {}).get("target_color")
+    if isinstance(tc, (list, tuple)) and len(tc) == 3:
+        data["detection"]["target_color"] = {
+            "r": int(tc[0]),
+            "g": int(tc[1]),
+            "b": int(tc[2]),
+        }
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
 
