@@ -1,0 +1,44 @@
+{
+    "window": {
+        "title_keyword": "我的世界",
+        "check_interval_ms": 2000
+    },
+    "fishing": {
+        "pull_interval_ms": 100,
+        "pull_duration_ms": 3500,
+        "recast_delay_min_ms": 1000,
+        "recast_delay_max_ms": 5000
+    },
+    "detection": {
+        "use_template_matching": false,
+        "template_match_threshold": 0.8,
+        "use_color_detection": true,
+        "target_color": [
+            252,
+            252,
+            252
+        ],
+        "color_tolerance": 30,
+        "white_threshold": 235,
+        "white_pixel_threshold": 400,
+        "min_component_size": 50,
+        "max_white_ratio": 0.6,
+        "bite_confirm_frames": 3,
+        "bite_cooldown_ms": 1500,
+        "screenshot_interval_ms": 50
+    },
+    "hotkeys": {
+        "toggle": "f6",
+        "stop": "f7",
+        "select_region": "f8",
+        "test": "f9",
+        "capture_template": "f10",
+        "pick_color": "f11"
+    },
+    "roi": {
+        "x": 0.46642561983471076,
+        "y": 0.5145985401459854,
+        "width": 0.07747933884297521,
+        "height": 0.06751824817518248
+    }
+}
