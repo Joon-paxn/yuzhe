@@ -12,6 +12,9 @@ pixel_picker.py
 
 支持一次会话内连续取多个颜色 (F10 双重取色用)，
 在同一个 Tk 根窗口内依次取色，避免多次创建/销毁 Tk 导致第二个窗口不显示。
+
+阶段二新增 pick_pixel_colors_with_pos：返回 [(rgb, (x,y)), ...]，
+用于自适应模型记录 A/B 检测点的屏幕坐标。
 """
 
 from __future__ import annotations
@@ -32,27 +35,26 @@ CROSS_SIZE = 12          # 十字准星半长
 MAGNIFY_OFFSET = 20      # 放大镜相对光标的偏移 (避免挡住光标)
 
 
-def pick_pixel_colors(hints: list) -> list:
+def pick_pixel_colors_with_pos(hints: list) -> list:
     """
-    启动一次全屏取色会话，连续取多个颜色。
-
-    在同一个 Tk 根窗口内依次取色，避免多次创建/销毁 Tk 导致的窗口不显示问题。
-    每取完一个，顶部提示自动切换为下一个，取完所有或中途取消即退出。
+    启动一次全屏取色会话，连续取多个颜色，同时返回每个点的屏幕坐标。
 
     Args:
-        hints: 每次取色的提示文字列表，长度即取色次数
-               (如 ["取色 A 点...", "取色 B 点..."])
+        hints: 每次取色的提示文字列表
 
     Returns:
-        与 hints 等长的列表，每项为 (R,G,B) 元组；中途取消时剩余项为 None。
+        与 hints 等长的列表，每项为 ((R,G,B), (x,y)) 元组；
+        中途取消时剩余项为 (None, (0,0))。
+        坐标 (x,y) 为相对整个虚拟桌面的绝对像素坐标 (与 mss 截图一致)。
     """
     n = len(hints)
     if n == 0:
         return []
-    results = [None] * n
-    state_idx = {"i": 0}  # 当前要取的是第几个
+    # 同时记录颜色和坐标
+    results = [((None, (0, 0))) for _ in range(n)]
+    coords = [(0, 0)] * n
+    state_idx = {"i": 0}
 
-    # 1. 截取全屏 (整个会话复用同一张截图，保证 A/B 来自同一帧)
     try:
         with mss.mss() as sct:
             monitor = sct.monitors[0]
@@ -62,9 +64,8 @@ def pick_pixel_colors(hints: list) -> list:
             img = Image.frombytes("RGB", shot.size, shot.rgb)
     except Exception as e:
         print(f"[pixel_picker] 全屏截图失败: {e}")
-        return results
+        return [((None, (0, 0))) for _ in range(n)]
 
-    # 2. 创建全屏覆盖窗口 (整个会话只创建一次)
     root = tk.Tk()
     root.attributes("-fullscreen", True)
     root.attributes("-topmost", True)
@@ -79,29 +80,23 @@ def pick_pixel_colors(hints: list) -> list:
     )
     canvas.pack(fill="both", expand=True)
     canvas.create_image(0, 0, image=photo, anchor="nw")
-    canvas.image = photo  # 防止 GC
+    canvas.image = photo
 
-    # 提示文字 (随取色进度切换)
     hint_id = canvas.create_text(
-        screen_w // 2, 30,
-        text=hints[0],
+        screen_w // 2, 30, text=hints[0],
         fill="yellow", font=("Microsoft YaHei", 18, "bold"),
     )
-    # 进度文字
     prog_id = canvas.create_text(
-        screen_w // 2, 58,
-        text=f"第 1 / {n} 点",
+        screen_w // 2, 58, text=f"第 1 / {n} 点",
         fill="lime", font=("Microsoft YaHei", 13, "bold"),
     )
 
-    # 放大镜状态
     state = {
         "mag_img": None, "mag_rect_id": None, "mag_img_id": None,
         "cross_h": None, "cross_v": None, "info_id": None,
     }
 
     def get_cursor_xy(_event) -> Tuple[int, int]:
-        """获取鼠标在屏幕上的坐标 (与截图坐标一致)"""
         x = root.winfo_pointerx()
         y = root.winfo_pointery()
         x = max(0, min(screen_w - 1, x))
@@ -109,13 +104,10 @@ def pick_pixel_colors(hints: list) -> list:
         return x, y
 
     def pixel_rgb(x: int, y: int) -> Tuple[int, int, int]:
-        """从截图数组中读取 (x,y) 像素的 RGB 值"""
-        # raw 是 BGRA 格式
         b, g, r = int(raw[y, x, 0]), int(raw[y, x, 1]), int(raw[y, x, 2])
         return (r, g, b)
 
     def draw_magnifier(x: int, y: int) -> None:
-        """在光标旁绘制放大镜 + RGB 信息"""
         mx = x + MAGNIFY_OFFSET
         my = y + MAGNIFY_OFFSET
         if mx + MAGNIFY_SIZE > screen_w:
@@ -134,7 +126,6 @@ def pick_pixel_colors(hints: list) -> list:
         mag = crop.resize((MAGNIFY_SIZE, MAGNIFY_SIZE), Image.NEAREST)
         state["mag_img"] = ImageTk.PhotoImage(mag, master=root)
 
-        # 清除旧放大镜
         for item in (state["mag_rect_id"], state["mag_img_id"],
                      state["cross_h"], state["cross_v"], state["info_id"]):
             if item is not None:
@@ -169,9 +160,9 @@ def pick_pixel_colors(hints: list) -> list:
         draw_magnifier(x, y)
 
     def on_pick(event) -> None:
-        """左键确认当前点；取完最后一个才关闭，否则切到下一个提示"""
         x, y = get_cursor_xy(event)
-        results[state_idx["i"]] = pixel_rgb(x, y)
+        i = state_idx["i"]
+        results[i] = (pixel_rgb(x, y), (x, y))
         state_idx["i"] += 1
         if state_idx["i"] >= n:
             try:
@@ -184,14 +175,12 @@ def pick_pixel_colors(hints: list) -> list:
             canvas.itemconfig(prog_id, text=f"第 {state_idx['i'] + 1} / {n} 点")
 
     def on_cancel(_event=None) -> None:
-        """右键 / Esc / 关闭：结束会话，剩余项保持 None"""
         try:
             root.grab_release()
         except Exception:
             pass
         root.destroy()
 
-    # 事件绑定 (绑定到全屏 canvas，确保一定能收到)
     canvas.bind("<Motion>", on_motion)
     canvas.bind("<Button-1>", on_pick)
     canvas.bind("<Button-3>", on_cancel)
@@ -201,6 +190,17 @@ def pick_pixel_colors(hints: list) -> list:
 
     root.mainloop()
     return results
+
+
+def pick_pixel_colors(hints: list) -> list:
+    """
+    启动一次全屏取色会话，连续取多个颜色 (仅返回 RGB，不返回坐标)。
+
+    保留阶段一接口，向后兼容。
+    等价于 [c[0] for c in pick_pixel_colors_with_pos(hints)]。
+    """
+    full = pick_pixel_colors_with_pos(hints)
+    return [c[0] for c in full]
 
 
 def pick_pixel_color(hint: str = "左键取色  |  右键 / Esc 取消") -> Optional[Tuple[int, int, int]]:

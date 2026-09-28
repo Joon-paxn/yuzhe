@@ -31,7 +31,18 @@
         "max_white_ratio": 0.6,
         "bite_confirm_frames": 3,
         "bite_cooldown_ms": 1500,
-        "screenshot_interval_ms": 50
+        "screenshot_interval_ms": 50,
+        "point_a_ratio": [0.0, 0.0],
+        "point_b_ratio": [0.0, 0.0],
+        "points_ratio_set": false
+    },
+    "adaptive_rgb": {
+        "enabled": true,
+        "max_samples": 50,
+        "min_samples": 5,
+        "min_tolerance": 8,
+        "max_tolerance": 40,
+        "outlier_threshold": 2.0
     },
     "hotkeys": {
         "toggle": "f6",

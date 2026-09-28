@@ -50,6 +50,23 @@ class DetectionConfig:
     bite_confirm_frames: int = 3         # 连续确认帧数
     bite_cooldown_ms: int = 1500         # 咬钩冷却时间，防止重复触发
     screenshot_interval_ms: int = 50     # 截图检测间隔
+    # ---- 阶段二：A/B 检测点屏幕坐标 (相对 Minecraft 窗口比例) ----
+    # 由 F10 取色时同时记录，用于自适应模型每帧采样固定点 RGB。
+    # None 表示未设置；启用 adaptive_rgb 时必须已设置。
+    point_a_ratio: Tuple[float, float] = (0.0, 0.0)  # (rx, ry) 相对窗口比例
+    point_b_ratio: Tuple[float, float] = (0.0, 0.0)
+    points_ratio_set: bool = False        # A/B 坐标是否已设置
+
+
+@dataclass
+class AdaptiveRGBConfig:
+    """自适应 RGB 颜色模型配置 (阶段二 Beta)"""
+    enabled: bool = False                  # 是否启用自适应模型 (关闭则走阶段一色差掩膜计数)
+    max_samples: int = 50                  # 历史样本最大数量
+    min_samples: int = 5                   # 冷启动所需最小样本数
+    min_tolerance: int = 8                # 单通道最小容差
+    max_tolerance: int = 40               # 单通道最大容差
+    outlier_threshold: float = 2.0        # 异常过滤阈值倍数 (新样本与 Reference 差 > 此值 * tolerance 视为异常)
 
 
 @dataclass
@@ -80,6 +97,7 @@ class AppConfig:
     detection: DetectionConfig = field(default_factory=DetectionConfig)
     hotkeys: HotkeyConfig = field(default_factory=HotkeyConfig)
     roi: RoiConfig = field(default_factory=RoiConfig)
+    adaptive_rgb: AdaptiveRGBConfig = field(default_factory=AdaptiveRGBConfig)
 
 
 _DEFAULT_CONFIG = AppConfig()
@@ -109,7 +127,6 @@ def load_config(config_path: str) -> AppConfig:
             user_dict: Dict[str, Any] = json.load(f)
     except (json.JSONDecodeError, OSError) as e:
         print(f"[config] 配置文件损坏，使用默认配置: {e}")
-        # 备份损坏的配置
         backup_path = config_path + ".broken"
         try:
             os.rename(config_path, backup_path)
@@ -126,6 +143,9 @@ def load_config(config_path: str) -> AppConfig:
     det_dict = merged_dict.get("detection", {})
     det_dict["target_color"] = _normalize_color(det_dict.get("target_color"))
     det_dict["target_color_b"] = _normalize_color(det_dict.get("target_color_b"))
+    # 规范化 point_a/b_ratio：支持 [x,y] 数组格式
+    det_dict["point_a_ratio"] = _normalize_ratio_pair(det_dict.get("point_a_ratio"))
+    det_dict["point_b_ratio"] = _normalize_ratio_pair(det_dict.get("point_b_ratio"))
 
     try:
         config = AppConfig(
@@ -134,6 +154,7 @@ def load_config(config_path: str) -> AppConfig:
             detection=DetectionConfig(**_filter_fields(DetectionConfig, det_dict)),
             hotkeys=HotkeyConfig(**_filter_fields(HotkeyConfig, merged_dict.get("hotkeys", {}))),
             roi=RoiConfig(**_filter_fields(RoiConfig, merged_dict.get("roi", {}))),
+            adaptive_rgb=AdaptiveRGBConfig(**_filter_fields(AdaptiveRGBConfig, merged_dict.get("adaptive_rgb", {}))),
         )
     except TypeError as e:
         print(f"[config] 配置字段错误，使用默认配置: {e}")
@@ -173,6 +194,22 @@ def _normalize_color(value: Any) -> Tuple[int, int, int]:
     return (255, 255, 255)
 
 
+def _normalize_ratio_pair(value: Any) -> Tuple[float, float]:
+    """
+    规范化为 (x, y) 比例元组，用于检测点坐标。
+    支持 [x, y] 数组或 {"x":..,"y":..} 对象。
+    """
+    if isinstance(value, dict):
+        x = value.get("x")
+        y = value.get("y")
+        if isinstance(x, (int, float)) and isinstance(y, (int, float)):
+            return (float(x), float(y))
+    elif isinstance(value, (list, tuple)) and len(value) == 2:
+        if all(isinstance(v, (int, float)) for v in value):
+            return (float(value[0]), float(value[1]))
+    return (0.0, 0.0)
+
+
 def save_config(config_path: str, config: AppConfig) -> None:
     """保存配置到 JSON 文件，颜色以 RGB 对象格式保存"""
     data = asdict(config)
@@ -180,18 +217,18 @@ def save_config(config_path: str, config: AppConfig) -> None:
     tc = data.get("detection", {}).get("target_color")
     if isinstance(tc, (list, tuple)) and len(tc) == 3:
         data["detection"]["target_color"] = {
-            "r": int(tc[0]),
-            "g": int(tc[1]),
-            "b": int(tc[2]),
+            "r": int(tc[0]), "g": int(tc[1]), "b": int(tc[2]),
         }
-    # target_color_b 同样转为 RGB 对象格式
     tcb = data.get("detection", {}).get("target_color_b")
     if isinstance(tcb, (list, tuple)) and len(tcb) == 3:
         data["detection"]["target_color_b"] = {
-            "r": int(tcb[0]),
-            "g": int(tcb[1]),
-            "b": int(tcb[2]),
+            "r": int(tcb[0]), "g": int(tcb[1]), "b": int(tcb[2]),
         }
+    # point_a/b_ratio 保持数组 [x,y] 格式
+    for k in ("point_a_ratio", "point_b_ratio"):
+        v = data.get("detection", {}).get(k)
+        if isinstance(v, (list, tuple)) and len(v) == 2:
+            data["detection"][k] = [float(v[0]), float(v[1])]
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
 
@@ -200,11 +237,7 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any
     """深度合并两个字典，override 中的值覆盖 base"""
     result = dict(base)
     for key, value in override.items():
-        if (
-            key in result
-            and isinstance(result[key], dict)
-            and isinstance(value, dict)
-        ):
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
             result[key] = _deep_merge(result[key], value)
         else:
             result[key] = value
@@ -215,6 +248,7 @@ def _validate_config(config: AppConfig) -> None:
     """校验配置合理性，不合规则修正并提示"""
     det = config.detection
     fish = config.fishing
+    ada = config.adaptive_rgb
 
     if fish.pull_interval_ms < 10:
         fish.pull_interval_ms = 10
@@ -242,22 +276,13 @@ def _validate_config(config: AppConfig) -> None:
         print("[config] template_match_threshold 超出范围，已修正")
     if det.color_tolerance < 0 or det.color_tolerance > 255:
         det.color_tolerance = max(0, min(255, det.color_tolerance))
-    # 校验 target_color 是 3 个 0~255 的整数
+    # 校验 target_color
     tc = det.target_color
-    if (
-        not isinstance(tc, (list, tuple))
-        or len(tc) != 3
-        or any(not isinstance(v, int) or v < 0 or v > 255 for v in tc)
-    ):
+    if not isinstance(tc, (list, tuple)) or len(tc) != 3 or any(not isinstance(v, int) or v < 0 or v > 255 for v in tc):
         det.target_color = (255, 255, 255)
         print("[config] target_color 格式错误，已重置为白色")
-    # 校验 target_color_b
     tcb = det.target_color_b
-    if (
-        not isinstance(tcb, (list, tuple))
-        or len(tcb) != 3
-        or any(not isinstance(v, int) or v < 0 or v > 255 for v in tcb)
-    ):
+    if not isinstance(tcb, (list, tuple)) or len(tcb) != 3 or any(not isinstance(v, int) or v < 0 or v > 255 for v in tcb):
         det.target_color_b = (255, 255, 255)
         print("[config] target_color_b 格式错误，已重置为白色")
     if det.bite_confirm_frames < 1:
@@ -266,6 +291,28 @@ def _validate_config(config: AppConfig) -> None:
         det.bite_cooldown_ms = 0
     if det.screenshot_interval_ms < 1:
         det.screenshot_interval_ms = 1
+    # 校验 point_a/b_ratio 范围 0~1
+    for attr in ("point_a_ratio", "point_b_ratio"):
+        v = getattr(det, attr)
+        if len(v) != 2:
+            setattr(det, attr, (0.0, 0.0))
+        else:
+            v = (max(0.0, min(1.0, float(v[0]))), max(0.0, min(1.0, float(v[1]))))
+            setattr(det, attr, v)
+
+    # 自适应模型参数校验
+    if ada.max_samples < ada.min_samples:
+        ada.max_samples = ada.min_samples
+        print("[config] adaptive_rgb.max_samples 小于 min_samples，已修正")
+    if ada.min_samples < 1:
+        ada.min_samples = 1
+    if ada.min_tolerance < 0:
+        ada.min_tolerance = 0
+    if ada.max_tolerance < ada.min_tolerance:
+        ada.max_tolerance = ada.min_tolerance
+        print("[config] adaptive_rgb.max_tolerance 小于 min_tolerance，已修正")
+    if ada.outlier_threshold < 1.0:
+        ada.outlier_threshold = 1.0
 
     # ROI 范围限制在 0~1
     roi = config.roi
