@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, asdict, fields
 from typing import Any, Dict, Tuple
 
 
@@ -39,7 +39,9 @@ class DetectionConfig:
     use_template_matching: bool = False  # 是否使用模板匹配
     template_match_threshold: float = 0.80  # 模板匹配置信度阈值 (0~1)
     use_color_detection: bool = False    # 是否使用目标颜色检测 (取色器选取)
-    target_color: Tuple[int, int, int] = (255, 255, 255)  # 目标颜色 RGB
+    target_color: Tuple[int, int, int] = (255, 255, 255)  # 目标颜色 A 点 RGB
+    target_color_b: Tuple[int, int, int] = (255, 255, 255)  # 目标颜色 B 点 RGB (双重取色)
+    use_dual_color: bool = False         # 启用双重取色混合判断 (A 且 B 同时通过才触发)
     color_tolerance: int = 30            # 颜色匹配容差 (每个通道)
     white_threshold: int = 235           # 单通道白色阈值 (R/G/B 均需大于此值)
     white_pixel_threshold: int = 800     # 大连通域白色像素数量阈值
@@ -123,14 +125,15 @@ def load_config(config_path: str) -> AppConfig:
     # 规范化 target_color：支持对象 {r,g,b} 和数组 [r,g,b] 两种格式
     det_dict = merged_dict.get("detection", {})
     det_dict["target_color"] = _normalize_color(det_dict.get("target_color"))
+    det_dict["target_color_b"] = _normalize_color(det_dict.get("target_color_b"))
 
     try:
         config = AppConfig(
-            window=WindowConfig(**merged_dict.get("window", {})),
-            fishing=FishingConfig(**merged_dict.get("fishing", {})),
-            detection=DetectionConfig(**det_dict),
-            hotkeys=HotkeyConfig(**merged_dict.get("hotkeys", {})),
-            roi=RoiConfig(**merged_dict.get("roi", {})),
+            window=WindowConfig(**_filter_fields(WindowConfig, merged_dict.get("window", {}))),
+            fishing=FishingConfig(**_filter_fields(FishingConfig, merged_dict.get("fishing", {}))),
+            detection=DetectionConfig(**_filter_fields(DetectionConfig, det_dict)),
+            hotkeys=HotkeyConfig(**_filter_fields(HotkeyConfig, merged_dict.get("hotkeys", {}))),
+            roi=RoiConfig(**_filter_fields(RoiConfig, merged_dict.get("roi", {}))),
         )
     except TypeError as e:
         print(f"[config] 配置字段错误，使用默认配置: {e}")
@@ -138,6 +141,16 @@ def load_config(config_path: str) -> AppConfig:
 
     _validate_config(config)
     return config
+
+
+def _filter_fields(cls, data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    过滤字典只保留 cls 数据类的已知字段，忽略未知键。
+    使旧版本残留的废弃字段 (如 use_dual_detection / select_region_b / roi_b)
+    不会导致 TypeError 回退默认值，保留用户的自定义配置。
+    """
+    known = {f.name for f in fields(cls)}
+    return {k: v for k, v in data.items() if k in known}
 
 
 def _normalize_color(value: Any) -> Tuple[int, int, int]:
@@ -170,6 +183,14 @@ def save_config(config_path: str, config: AppConfig) -> None:
             "r": int(tc[0]),
             "g": int(tc[1]),
             "b": int(tc[2]),
+        }
+    # target_color_b 同样转为 RGB 对象格式
+    tcb = data.get("detection", {}).get("target_color_b")
+    if isinstance(tcb, (list, tuple)) and len(tcb) == 3:
+        data["detection"]["target_color_b"] = {
+            "r": int(tcb[0]),
+            "g": int(tcb[1]),
+            "b": int(tcb[2]),
         }
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
@@ -230,6 +251,15 @@ def _validate_config(config: AppConfig) -> None:
     ):
         det.target_color = (255, 255, 255)
         print("[config] target_color 格式错误，已重置为白色")
+    # 校验 target_color_b
+    tcb = det.target_color_b
+    if (
+        not isinstance(tcb, (list, tuple))
+        or len(tcb) != 3
+        or any(not isinstance(v, int) or v < 0 or v > 255 for v in tcb)
+    ):
+        det.target_color_b = (255, 255, 255)
+        print("[config] target_color_b 格式错误，已重置为白色")
     if det.bite_confirm_frames < 1:
         det.bite_confirm_frames = 1
     if det.bite_cooldown_ms < 0:

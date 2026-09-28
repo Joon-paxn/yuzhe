@@ -207,14 +207,24 @@ class AutoFishingApp:
                 last_log = now
                 status = "检测到咬钩！" if result.bite_detected else "未检测到咬钩"
                 mode = self._detector.get_mode_name()
-                self._log.test(
-                    f"[{mode}] "
-                    f"匹配度={result.match_score:.3f} | "
-                    f"总白={result.white_pixels} | "
-                    f"大连通域白={result.large_white_pixels} | "
-                    f"连通域数={result.component_count} | "
-                    f"状态={status}"
-                )
+                if result.dual_color_used:
+                    a_status = "通过" if result.color_a_passed else "未通过"
+                    b_status = "通过" if result.color_b_passed else "未通过"
+                    self._log.test(
+                        f"[{mode}] "
+                        f"A:{a_status}({result.color_a_large}px) | "
+                        f"B:{b_status}({result.color_b_large}px) | "
+                        f"状态={status}"
+                    )
+                else:
+                    self._log.test(
+                        f"[{mode}] "
+                        f"匹配度={result.match_score:.3f} | "
+                        f"总白={result.white_pixels} | "
+                        f"大连通域白={result.large_white_pixels} | "
+                        f"连通域数={result.component_count} | "
+                        f"状态={status}"
+                    )
 
             # 检查是否有新任务 (例如用户再次按 F9/F8/F10)
             try:
@@ -234,6 +244,12 @@ class AutoFishingApp:
             self._log.info(
                 f"当前使用模板匹配。匹配度 >= {det.template_match_threshold:.2f} 判定为咬钩。"
             )
+        elif mode == "双重取色":
+            self._log.info(
+                f"当前使用双重取色混合判断。"
+                f"A 色 RGB{det.target_color}，B 色 RGB{det.target_color_b}，"
+                f"容差±{det.color_tolerance}，两色大连通域像素均 >= {det.white_pixel_threshold} 才判定咬钩。"
+            )
         elif mode == "颜色检测":
             self._log.info(
                 f"当前使用颜色检测。目标色 RGB{det.target_color}，"
@@ -247,15 +263,15 @@ class AutoFishingApp:
 
     def _do_capture_template(self) -> None:
         """
-        F10: 截取「咬钩！」—— 一次操作同时完成取色 + 截模板。
+        F10: 截取「咬钩！」—— 双重取色 + 截模板一次完成。
 
         流程：
-        1. 弹出全屏取色器，用户左键点击「咬钩！」文字上的像素
-        2. 取该像素颜色 → 保存为 target_color，启用颜色检测
-        3. 取色后立即截取当前 ROI 区域 → 保存为 bite_template.png
+        1. 弹出取色器取 A 点颜色 (建议「咬钩！」文字主体像素)
+        2. 再弹出取色器取 B 点颜色 (建议文字描边或另一处明显像素)
+        3. 保存 target_color(A) / target_color_b(B)，启用颜色检测 + 双重取色混合判断
+        4. 取色后立即截取当前 ROI 区域 → 保存为 bite_template.png
 
-        这样用户只需在咬钩出现时按一次 F10、点一下文字，
-        颜色和模板都搞定，不用分别操作 F10+F11。
+        双重取色：咬钩判断需 A 色、B 色各自达到阈值同时通过才触发，降低误触发。
         """
         if self._engine is not None and self._engine.is_running():
             self._log.warn("请先停止自动钓鱼 (F7) 再截取咬钩")
@@ -275,36 +291,42 @@ class AutoFishingApp:
             self._log.error("请先按 F8 选择检测区域，再截取咬钩")
             return
 
-        self._log.info("=== 截取咬钩（取色 + 模板）===")
-        self._log.info(
-            "即将弹出取色器：移动鼠标到「咬钩！」文字上，左键确认，右键/Esc 取消"
-        )
+        self._log.info("=== 截取咬钩（双重取色 A+B + 模板）===")
 
-        # 第一步：取色
-        color = pick_pixel_color()
-        if color is None:
-            self._log.info("已取消，未做任何更改")
+        # 第一步：取色 A 点
+        self._log.info("取色 A 点：移动到「咬钩！」文字主体像素，左键确认")
+        color_a = pick_pixel_color("取色 A 点：移动到「咬钩！」文字主体，左键确认  |  右键/Esc 取消")
+        if color_a is None:
+            self._log.info("已取消 A 点取色，未做任何更改")
             return
 
-        r, g, b = color
-        self._config.detection.target_color = (r, g, b)
+        # 第二步：取色 B 点
+        self._log.info("取色 B 点：移动到「咬钩！」文字描边或另一处像素，左键确认")
+        color_b = pick_pixel_color("取色 B 点：移动到「咬钩！」描边/另一像素，左键确认  |  右键/Esc 取消")
+        if color_b is None:
+            self._log.info("已取消 B 点取色，未做任何更改")
+            return
+
+        ra, ga, ba = color_a
+        rb, gb, bb = color_b
+        self._config.detection.target_color = (ra, ga, ba)
+        self._config.detection.target_color_b = (rb, gb, bb)
         self._config.detection.use_color_detection = True
+        self._config.detection.use_dual_color = True
         save_config(CONFIG_PATH, self._config)
         if self._detector is not None:
             self._detector.update_config(self._config.detection, self._config.roi)
-        self._log.success(f"已取色 RGB({r},{g},{b})，颜色检测已启用")
+        self._log.success(
+            f"双重取色完成：A=RGB({ra},{ga},{ba})  B=RGB({rb},{gb},{bb})，混合判断已启用"
+        )
 
-        # 第二步：截取 ROI 为模板（此时咬钩仍在屏幕上）
+        # 第三步：截取 ROI 为模板（此时咬钩仍在屏幕上）
         self._log.info("正在截取模板...")
         success = self._detector.capture_template()
         if success:
-            self._log.success(
-                "模板已保存！取色 + 模板均已完成。可按 F9 测试效果。"
-            )
+            self._log.success("模板已保存！双重取色 + 模板均已完成。可按 F9 测试效果。")
         else:
-            self._log.warn(
-                "模板截取失败（颜色已保存）。可稍后再按 F10 补截模板。"
-            )
+            self._log.warn("模板截取失败（双重取色已保存）。可稍后再按 F10 补截模板。")
 
     def _do_pick_color(self) -> None:
         """F11: 已合并到 F10（取色 + 截模板一次完成）。保留入口避免旧配置报错。"""
@@ -341,11 +363,14 @@ class AutoFishingApp:
         self._log.info("  F7  - 立即停止自动钓鱼")
         self._log.info("  F8  - 重新选择「咬钩！」检测区域")
         self._log.info("  F9  - 测试当前检测区域")
-        self._log.info("  F10 - 截取咬钩 (取色 + 模板一次完成，出现咬钩时按)")
+        self._log.info("  F10 - 截取咬钩 (双重取色 A+B + 模板一次完成，出现咬钩时按)")
         self._log.info("  Ctrl+C - 退出程序")
         self._log.info(
             "使用流程: F8选区域 -> 抛竿等「咬钩！」出现 -> "
-            "F10截取咬钩 -> F9测试 -> F6开始"
+            "F10双重取色+模板 -> F9测试 -> F6开始"
+        )
+        self._log.info(
+            "双重取色: 咬钩需 A 色、B 色同时达标才触发，降低误触发"
         )
         self._log.info(
             "失焦保护: 切换到其他窗口会自动暂停，切回 Minecraft 等 3 秒自动恢复"

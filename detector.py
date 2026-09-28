@@ -41,6 +41,12 @@ class DetectionResult:
     match_score: float                         # 模板匹配置信度 (0~1)，无模板时为 0
     bite_detected: bool
     roi_screen: Tuple[int, int, int, int]      # (x, y, w, h) 屏幕坐标
+    # ---- 阶段一：双重取色混合判断 ----
+    color_a_passed: bool = False               # 颜色 A 是否通过
+    color_b_passed: bool = False               # 颜色 B 是否通过
+    dual_color_used: bool = False              # 本次检测是否启用了双取色
+    color_a_large: int = 0                      # 颜色 A 大连通域像素数
+    color_b_large: int = 0                      # 颜色 B 大连通域像素数
 
 
 class BiteDetector:
@@ -126,7 +132,7 @@ class BiteDetector:
         if self._det_cfg.use_template_matching and self._template is not None:
             return "模板匹配"
         if self._det_cfg.use_color_detection:
-            return "颜色检测"
+            return "双重取色" if self._det_cfg.use_dual_color else "颜色检测"
         return "白像素"
 
     # ---------------- ROI 计算与截图 ----------------
@@ -201,25 +207,24 @@ class BiteDetector:
 
     # ---------------- 目标颜色检测 ----------------
 
-    def _build_color_mask(self, frame: np.ndarray) -> np.ndarray:
+    def _build_color_mask(self, frame: np.ndarray, color: Tuple[int, int, int]) -> np.ndarray:
         """
         构建目标颜色匹配掩码。
 
-        判定条件: 像素 RGB 三通道均在 target_color ± color_tolerance 范围内。
-        frame 为 BGR 格式。
+        判定条件: 像素 RGB 三通道均在 color ± color_tolerance 范围内。
+        frame 为 BGR 格式，color 为 RGB。
         """
-        cfg = self._det_cfg
-        tr, tg, tb = cfg.target_color  # RGB
-        tol = cfg.color_tolerance
+        tol = self._det_cfg.color_tolerance
+        tr, tg, tb = color  # RGB
         # frame 是 BGR: [B, G, R]
         b_match = np.abs(frame[:, :, 0].astype(int) - tb) <= tol
         g_match = np.abs(frame[:, :, 1].astype(int) - tg) <= tol
         r_match = np.abs(frame[:, :, 2].astype(int) - tr) <= tol
         return (b_match & g_match & r_match).astype(np.uint8) * 255
 
-    def analyze_color(self, frame: np.ndarray) -> Tuple[int, int, int]:
+    def analyze_color(self, frame: np.ndarray, color: Tuple[int, int, int]) -> Tuple[int, int, int]:
         """返回 (总匹配像素, 大连通域匹配像素, 连通域数量)"""
-        mask = self._build_color_mask(frame)
+        mask = self._build_color_mask(frame, color)
         total = int(np.count_nonzero(mask))
 
         num_labels, _, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
@@ -293,9 +298,32 @@ class BiteDetector:
 
         # 2. 目标颜色检测模式
         if cfg.use_color_detection:
-            total_color, large_color, color_comps = self.analyze_color(frame)
             roi_area = roi[2] * roi[3]
             max_allowed = int(roi_area * cfg.max_white_ratio)
+
+            # 阶段一：双重取色混合判断 (A 且 B 同时通过才触发)
+            if cfg.use_dual_color:
+                a_total, a_large, a_comps = self.analyze_color(frame, cfg.target_color)
+                b_total, b_large, b_comps = self.analyze_color(frame, cfg.target_color_b)
+                a_passed = a_large >= cfg.white_pixel_threshold and a_large <= max_allowed
+                b_passed = b_large >= cfg.white_pixel_threshold and b_large <= max_allowed
+                bite = a_passed and b_passed
+                return DetectionResult(
+                    white_pixels=a_total,          # 复用字段显示 A 总匹配数
+                    large_white_pixels=a_large,    # 复用字段显示 A 大连通域数
+                    component_count=a_comps,
+                    match_score=0.0,
+                    bite_detected=bite,
+                    roi_screen=roi,
+                    color_a_passed=a_passed,
+                    color_b_passed=b_passed,
+                    dual_color_used=True,
+                    color_a_large=a_large,
+                    color_b_large=b_large,
+                )
+
+            # 单取色模式 (原有逻辑)
+            total_color, large_color, color_comps = self.analyze_color(frame, cfg.target_color)
             bite = large_color >= cfg.white_pixel_threshold and large_color <= max_allowed
             return DetectionResult(
                 white_pixels=total_color,       # 复用字段显示匹配像素数

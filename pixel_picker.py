@@ -32,9 +32,12 @@ CROSS_SIZE = 12          # 十字准星半长
 MAGNIFY_OFFSET = 20      # 放大镜相对光标的偏移 (避免挡住光标)
 
 
-def pick_pixel_color() -> Optional[Tuple[int, int, int]]:
+def pick_pixel_color(hint: str = "左键取色  |  右键 / Esc 取消") -> Optional[Tuple[int, int, int]]:
     """
     启动全屏取色器，返回用户点击位置的像素 RGB 值。
+
+    Args:
+        hint: 顶部提示文字 (用于区分多重取色，如 "取色 A 点" / "取色 B 点")。
 
     Returns:
         (R, G, B) 元组；右键 / Esc / 关闭窗口时返回 None。
@@ -77,7 +80,7 @@ def pick_pixel_color() -> Optional[Tuple[int, int, int]]:
     # 提示文字
     hint_id = canvas.create_text(
         screen_w // 2, 30,
-        text="左键取色  |  右键 / Esc 取消",
+        text=hint,
         fill="yellow", font=("Microsoft YaHei", 18, "bold"),
     )
 

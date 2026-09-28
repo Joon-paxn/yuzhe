@@ -137,14 +137,14 @@ class FishingGUI:
             row2, text="测试 (F9)", command=self._on_test, width=18,
         ).pack(side="left", padx=2)
 
-        # 第三行：截取咬钩（合并取色+模板）
+        # 第三行：截取咬钩（双重取色+模板）
         row3 = ttk.Frame(btn_frame)
         row3.pack(fill="x", pady=2)
         ttk.Button(
             row3, text="截取咬钩 (F10)", command=self._on_capture_template, width=18,
         ).pack(side="left", padx=2)
         ttk.Label(
-            row3, text="取色+模板一次完成", foreground="gray",
+            row3, text="双重取色 A+B + 模板", foreground="gray",
         ).pack(side="left", padx=4)
 
         # ---- 快捷键提示 ----
@@ -348,20 +348,37 @@ class FishingGUI:
             f"咬钩: 右键单击收竿 | 抛竿延迟 {fish.recast_delay_min_ms}~{fish.recast_delay_max_ms}ms"
         )
 
-        # 颜色：显示当前 target_color 的 RGB 值 + 色块预览
+        # 颜色：显示 target_color (A 点) 的 RGB 值 + 色块预览
         tc = det.target_color  # (r, g, b)
         r, g, b = int(tc[0]), int(tc[1]), int(tc[2])
-        if det.use_color_detection:
+        if det.use_dual_color:
+            tcb = det.target_color_b
+            rb, gb, bb = int(tcb[0]), int(tcb[1]), int(tcb[2])
+            self._color_var.set(
+                f"A:RGB({r},{g},{b})  B:RGB({rb},{gb},{bb})  容差 ±{det.color_tolerance}  (双重取色已启用)"
+            )
+        elif det.use_color_detection:
             self._color_var.set(f"目标颜色: RGB({r}, {g}, {b})  容差 ±{det.color_tolerance}")
         else:
             self._color_var.set(f"目标颜色: RGB({r}, {g}, {b})  (颜色检测未启用)")
-        # 更新色块
+        # 更新色块：双取色时左半 A 右半 B，单色时整块
         if self._color_preview is not None:
-            color_hex = f"#{r:02x}{g:02x}{b:02x}"
             self._color_preview.delete("all")
-            self._color_preview.create_rectangle(
-                0, 0, 20, 20, fill=color_hex, outline=""
-            )
+            if det.use_dual_color:
+                tcb = det.target_color_b
+                rb, gb, bb = int(tcb[0]), int(tcb[1]), int(tcb[2])
+                self._color_preview.create_rectangle(
+                    0, 0, 10, 20,
+                    fill=f"#{r:02x}{g:02x}{b:02x}", outline="",
+                )
+                self._color_preview.create_rectangle(
+                    10, 0, 20, 20,
+                    fill=f"#{rb:02x}{gb:02x}{bb:02x}", outline="",
+                )
+            else:
+                self._color_preview.create_rectangle(
+                    0, 0, 20, 20, fill=f"#{r:02x}{g:02x}{b:02x}", outline=""
+                )
 
     def destroy(self) -> None:
         """销毁窗口"""
