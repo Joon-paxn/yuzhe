@@ -237,6 +237,22 @@ class FishingGUI:
                 self._update_info_text()
         except Exception as exc:
             self._app._log.error(f"任务执行失败 [{task}]: {exc}")
+        finally:
+            # 取色/框选用全屏覆盖窗口 (嵌套 mainloop + grab_set)，关闭后主窗口
+            # 事件处理被卡、且被 Minecraft 盖住，导致设置不刷新。强制重绘并提到最前。
+            self._refresh_after_overlay()
+
+    def _refresh_after_overlay(self) -> None:
+        """全屏取色/框选覆盖层关闭后，强制主窗口重绘并提到最前"""
+        root = self._root
+        if root is None or not root.winfo_exists():
+            return
+        try:
+            root.update_idletasks()
+            root.update()
+            root.lift()
+        except Exception:
+            pass
 
     def _check_window_valid(self) -> None:
         """Minecraft 窗口关闭则停止"""

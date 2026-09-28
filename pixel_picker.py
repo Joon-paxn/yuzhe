@@ -174,6 +174,10 @@ def pick_pixel_colors(hints: list) -> list:
         results[state_idx["i"]] = pixel_rgb(x, y)
         state_idx["i"] += 1
         if state_idx["i"] >= n:
+            try:
+                root.grab_release()
+            except Exception:
+                pass
             root.destroy()
         else:
             canvas.itemconfig(hint_id, text=hints[state_idx["i"]])
@@ -181,6 +185,10 @@ def pick_pixel_colors(hints: list) -> list:
 
     def on_cancel(_event=None) -> None:
         """右键 / Esc / 关闭：结束会话，剩余项保持 None"""
+        try:
+            root.grab_release()
+        except Exception:
+            pass
         root.destroy()
 
     # 事件绑定 (绑定到全屏 canvas，确保一定能收到)
