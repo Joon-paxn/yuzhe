@@ -41,13 +41,22 @@ class OcrService:
     ) -> None:
         self._mc = mc_window
         self._cfg = ocr_cfg
-        self._roi = OcrRoiConfig(
-            x=ocr_cfg.roi_x, y=ocr_cfg.roi_y,
-            width=ocr_cfg.roi_width, height=ocr_cfg.roi_height,
-        )
         self._log = get_logger()
         self._engine = engine if engine is not None else create_ocr_engine()
         self._parser = OcrParser()
+
+        # 阶段三：多 ROI 支持 (咬钩 + 枯竭面板位置不同，分别采集)
+        self._rois = {
+            "bite": OcrRoiConfig(
+                x=ocr_cfg.roi_x, y=ocr_cfg.roi_y,
+                width=ocr_cfg.roi_width, height=ocr_cfg.roi_height,
+            ),
+        }
+        if getattr(ocr_cfg, "depleted_enabled", True):
+            self._rois["depleted"] = OcrRoiConfig(
+                x=ocr_cfg.depleted_roi_x, y=ocr_cfg.depleted_roi_y,
+                width=ocr_cfg.depleted_roi_width, height=ocr_cfg.depleted_roi_height,
+            )
 
         self._sct = mss.mss()
 
@@ -132,48 +141,85 @@ class OcrService:
             self._running = False
 
     def _tick_once(self) -> None:
-        """截一次 ROI + 识别 + 缓存"""
-        frame = self._capture_roi()
-        if frame is None:
-            with self._lock:
-                self._latest_result = OcrResult(success=False, error="截图失败或窗口无效")
-                self._latest_state = GameState()
-            return
-        result = self._engine.recognize(frame)
-        state = self._parser.parse(result)
+        """采集所有 ROI + 识别 + 合并 + 缓存"""
+        all_lines = []
+        full_texts = []
+        any_success = False
+        errors = []
+        total_ms = 0.0
+        for name, roi in self._rois.items():
+            frame = self._capture_roi(roi)
+            if frame is None:
+                errors.append(f"{name}:截图失败")
+                continue
+            result = self._engine.recognize(frame)
+            if result.success:
+                any_success = True
+                all_lines.extend(result.lines)
+                full_texts.append(result.full_text)
+                total_ms += result.elapsed_ms
+            elif result.error:
+                errors.append(f"{name}:{result.error}")
+        merged = OcrResult(
+            lines=all_lines,
+            full_text=" ".join(t for t in full_texts if t),
+            success=any_success,
+            error="; ".join(errors) if not any_success and errors else None,
+            elapsed_ms=total_ms,
+        )
+        state = self._parser.parse(merged)
         with self._lock:
-            self._latest_result = result
+            self._latest_result = merged
             self._latest_state = state
             self._last_recog_ts = time.monotonic()
 
     # ---------------- 截图 ----------------
 
-    def _capture_roi(self) -> Optional[np.ndarray]:
+    def _capture_roi(self, roi: OcrRoiConfig) -> Optional[np.ndarray]:
         win_rect = self._mc.get_rect()
         if win_rect is None:
             return None
-        roi = self._roi.to_screen(win_rect)
-        if roi is None:
+        screen = roi.to_screen(win_rect)
+        if screen is None:
             return None
-        x, y, w, h = roi
+        x, y, w, h = screen
         monitor = {"left": x, "top": y, "width": w, "height": h}
         try:
             shot = self._sct.grab(monitor)
             return np.array(shot)[:, :, :3]
         except Exception as e:
-            self._log.error(f"OCR 截图失败: {e}")
+            self._log.error(f"OCR 截图失败 ({roi}): {e}")
             return None
 
-    def capture_roi_once(self) -> Optional[np.ndarray]:
-        """对外暴露的单次 ROI 截图 (供测试脚本使用)"""
-        return self._capture_roi()
+    def capture_roi_once(self, name: str = "bite") -> Optional[np.ndarray]:
+        """对外暴露的单次 ROI 截图 (供测试脚本使用)，默认咬钩 ROI"""
+        roi = self._rois.get(name)
+        if roi is None:
+            return None
+        return self._capture_roi(roi)
 
-    def get_roi_screen(self) -> Optional[tuple]:
-        """返回当前 ROI 屏幕坐标 (x,y,w,h)，供测试可视化"""
+    def capture_all_rois(self) -> dict:
+        """采集所有 ROI，返回 {name: ndarray} (供测试可视化)"""
+        out = {}
+        for name, roi in self._rois.items():
+            frame = self._capture_roi(roi)
+            if frame is not None:
+                out[name] = frame
+        return out
+
+    def get_roi_screen(self, name: str = "bite") -> Optional[tuple]:
+        """返回指定 ROI 屏幕坐标 (x,y,w,h)，供测试可视化"""
+        roi = self._rois.get(name)
+        if roi is None:
+            return None
         win_rect = self._mc.get_rect()
         if win_rect is None:
             return None
-        return self._roi.to_screen(win_rect)
+        return roi.to_screen(win_rect)
+
+    def get_roi_names(self) -> list:
+        """返回所有 ROI 名称 (供测试/GUI)"""
+        return list(self._rois.keys())
 
     # ---------------- 结果查询 (线程安全) ----------------
 
@@ -190,13 +236,16 @@ class OcrService:
         with self._lock:
             return self._last_recog_ts
 
-    def recognize_once(self, frame: Optional[np.ndarray] = None) -> OcrResult:
+    def recognize_once(self, frame: Optional[np.ndarray] = None, name: str = "bite") -> OcrResult:
         """
         同步识别一次 (供测试脚本使用，不走后台线程)。
-        frame 为 None 时自动截取当前 ROI。
+        frame 为 None 时自动截取指定 ROI (默认咬钩 ROI)。
         """
         if frame is None:
-            frame = self._capture_roi()
+            roi = self._rois.get(name)
+            if roi is None:
+                return OcrResult(success=False, error=f"未知 ROI: {name}")
+            frame = self._capture_roi(roi)
             if frame is None:
                 return OcrResult(success=False, error="截图失败或窗口无效")
         return self._engine.recognize(frame)

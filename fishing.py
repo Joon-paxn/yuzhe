@@ -5,11 +5,13 @@ fishing.py
 
 状态流转：
     WAITING_BITE -> (检测到咬钩) -> PULLING(右键收竿) -> RECAST_DELAY -> RECAST(右键抛竿) -> WAITING_BITE
+    WAITING_BITE -> (检测到钓点枯竭) -> DEPLETED (停止钓鱼，等待后续阶段自动寻找新钓点)
 
 操作说明：
 - 拉鱼阶段: 检测到咬钩后右键点击一次（收竿）。
 - 重抛等待: 随机 recast_delay_min_ms ~ recast_delay_max_ms。
 - 重抛: 一次独立右键点击（抛竿）。
+- 钓点枯竭: OCR 识别到「鱼群：枯竭」并持续确认后进入 DEPLETED，停止抛竿与咬钩检测。
 
 并发控制：
 - stop_event: F7 立即停止，最高优先级，所有循环都必须检查。
@@ -33,6 +35,7 @@ from detector import BiteDetector
 from input_controller import InputController
 from minecraft_window import MinecraftWindow
 from logger import get_logger
+from ocr import OcrService
 
 
 class State(Enum):
@@ -40,6 +43,7 @@ class State(Enum):
     PULLING = auto()
     RECAST_DELAY = auto()
     RECAST = auto()
+    DEPLETED = auto()      # 阶段三：钓点枯竭，停止钓鱼
 
 
 class FishingEngine:
@@ -51,11 +55,13 @@ class FishingEngine:
         mc_window: MinecraftWindow,
         detector: BiteDetector,
         input_ctrl: InputController,
+        ocr_service: Optional[OcrService] = None,
     ) -> None:
         self._cfg = config
         self._mc = mc_window
         self._detector = detector
         self._input = input_ctrl
+        self._ocr = ocr_service
         self._log = get_logger()
 
         self._state: State = State.WAITING_BITE
@@ -63,6 +69,10 @@ class FishingEngine:
 
         self._stop_event = threading.Event()
         self._pause_event = threading.Event()
+
+        # 阶段三：钓点枯竭检测 (时间窗确认，避免 OCR 闪烁误判)
+        self._depleted_since: float = 0.0       # 首次检测到枯竭的时间戳
+        self._depleted_warned: bool = False     # 枯竭检测不可用警告 (只提示一次)
 
         self._thread: Optional[threading.Thread] = None
 
@@ -79,6 +89,8 @@ class FishingEngine:
         self._pause_event.clear()
         self._state = State.WAITING_BITE
         self._detector.reset()
+        self._depleted_since = 0.0
+        self._depleted_warned = False
         self._running = True
         self._thread = threading.Thread(target=self._run, name="FishingEngine", daemon=True)
         self._thread.start()
@@ -112,6 +124,20 @@ class FishingEngine:
     def is_paused(self) -> bool:
         return self._pause_event.is_set()
 
+    def get_state(self) -> State:
+        """当前状态机状态 (供 GUI 显示)"""
+        return self._state
+
+    def get_state_name(self) -> str:
+        """当前状态名 (中文，供 GUI 显示)"""
+        return {
+            State.WAITING_BITE: "等待咬钩",
+            State.PULLING: "收竿中",
+            State.RECAST_DELAY: "抛竿等待",
+            State.RECAST: "抛竿",
+            State.DEPLETED: "钓点枯竭",
+        }.get(self._state, str(self._state))
+
     def wait(self) -> None:
         if self._thread is not None:
             self._thread.join()
@@ -134,6 +160,8 @@ class FishingEngine:
                     self._state_recast_delay()
                 elif self._state == State.RECAST:
                     self._state_recast()
+                elif self._state == State.DEPLETED:
+                    self._state_depleted()
                 if not self._stop_event.is_set():
                     time.sleep(0.01)
         except Exception as e:
@@ -153,6 +181,53 @@ class FishingEngine:
             return False
         return True
 
+    # ---------------- 阶段三：钓点枯竭检测 ----------------
+
+    def _ocr_ready(self) -> bool:
+        """OCR 服务是否就绪 (可用于枯竭检测)"""
+        return (
+            self._ocr is not None
+            and self._ocr.engine_available
+            and self._ocr.is_running
+        )
+
+    def _check_depleted(self) -> bool:
+        """
+        检查钓点是否枯竭。OCR 在独立后台线程持续识别「鱼群：枯竭」面板，
+        本方法只读最新 GameState，不阻塞。
+        要求枯竭持续 depleted_confirm_ms 才确认，避免 OCR 闪烁误判。
+        """
+        if not self._cfg.ocr.depleted_enabled:
+            return False
+        if not self._ocr_ready():
+            if not self._depleted_warned:
+                self._depleted_warned = True
+                self._log.warn(
+                    "钓点枯竭检测需要 OCR 服务运行 (ocr.enabled=true 或检测模式为 "
+                    "hybrid/ocr)，当前 OCR 不可用，枯竭检测关闭。"
+                )
+            return False
+        state = self._ocr.get_latest_state()
+        depleted = bool(state and state.depleted)
+        now = time.monotonic()
+        if depleted:
+            if self._depleted_since == 0.0:
+                self._depleted_since = now
+                self._log.info("检测到疑似钓点枯竭，正在确认...")
+                return False
+            confirm_s = self._cfg.ocr.depleted_confirm_ms / 1000.0
+            if now - self._depleted_since >= confirm_s:
+                return True
+            return False
+        # 未检测到 → 重置
+        self._depleted_since = 0.0
+        return False
+
+    def _state_depleted(self) -> None:
+        """DEPLETED: 钓点枯竭，停止钓鱼，等待 (后续阶段自动寻找新钓点)"""
+        # 进入此状态时已记录日志；此处阻塞线程等待用户停止或后续阶段接管
+        self._interruptible_sleep(0.5)
+
     def _state_waiting_bite(self) -> None:
         """WAITING_BITE: 循环截图检测咬钩"""
         self._log.info("等待咬钩...")
@@ -160,6 +235,14 @@ class FishingEngine:
 
         while not self._stop_event.is_set() and not self._pause_event.is_set():
             if not self._check_safety():
+                return
+            # 阶段三：优先检测钓点枯竭 (OCR 后台线程识别「鱼群：枯竭」)
+            if self._check_depleted():
+                self._log.warn(
+                    "钓点枯竭！停止钓鱼，进入 DEPLETED 状态 "
+                    "(等待后续阶段自动寻找新钓点)"
+                )
+                self._state = State.DEPLETED
                 return
             result = self._detector.detect_bite()
             if result.bite_detected:

@@ -69,14 +69,16 @@ class AutoFishingApp:
             self._mc, self._config.detection, self._config.roi, self._config.adaptive_rgb
         )
         self._input = InputController(self._mc)
-        self._engine = FishingEngine(
-            self._config, self._mc, self._detector, self._input
-        )
 
-        # OCR 识别层 (阶段二)：后台独立线程，供 hybrid/ocr 模式确认咬钩
-        # ocr.enabled=true 或 detection.mode ∈ {hybrid, ocr} 时启动
+        # OCR 识别层 (阶段二/三)：后台独立线程，供 hybrid/ocr 确认咬钩 + 枯竭检测
         self._ocr = OcrService(self._mc, self._config.ocr)
         self._detector.set_ocr_service(self._ocr)
+
+        self._engine = FishingEngine(
+            self._config, self._mc, self._detector, self._input, self._ocr
+        )
+
+        # ocr.enabled=true 或 detection.mode ∈ {hybrid, ocr} 时启动 OCR 后台线程
         need_ocr = self._config.ocr.enabled or self._config.detection.mode in ("hybrid", "ocr")
         if need_ocr:
             started = self._ocr.start()

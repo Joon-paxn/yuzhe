@@ -81,14 +81,24 @@ class OcrConfig:
 
     OCR ROI 以相对 Minecraft 窗口的归一化坐标保存，适配不同分辨率与窗口位置。
     enabled=False 时后台 OCR 服务不启动，现有钓鱼检测逻辑完全不受影响。
+
+    阶段三：新增独立的「枯竭检测 ROI」(鱼群：枯竭面板位于屏幕中部，
+    与底部咬钩文字位置不同)，以及枯竭确认时间。
     """
     enabled: bool = False                 # 是否启用 OCR 服务 (默认关闭，保持现有行为)
-    roi_x: float = 0.25                   # OCR 检测区域 x (相对窗口比例)
-    roi_y: float = 0.55                   # OCR 检测区域 y
-    roi_width: float = 0.50               # OCR 检测区域 width
-    roi_height: float = 0.15              # OCR 检测区域 height
+    roi_x: float = 0.25                   # 咬钩 OCR 检测区域 x (相对窗口比例)
+    roi_y: float = 0.55                   # 咬钩 OCR 检测区域 y
+    roi_width: float = 0.50               # 咬钩 OCR 检测区域 width
+    roi_height: float = 0.15              # 咬钩 OCR 检测区域 height
     interval_ms: int = 500                # 后台 OCR 识别间隔 (毫秒)
     min_confidence: float = 0.5           # 识别置信度下限 (低于此值的行丢弃)
+    # ---- 阶段三：钓点枯竭检测 ----
+    depleted_roi_x: float = 0.30          # 枯竭面板 ROI x (屏幕中部)
+    depleted_roi_y: float = 0.35          # 枯竭面板 ROI y
+    depleted_roi_width: float = 0.40      # 枯竭面板 ROI width
+    depleted_roi_height: float = 0.25     # 枯竭面板 ROI height
+    depleted_confirm_ms: int = 1000       # 枯竭持续确认时间 (毫秒，避免闪烁误判)
+    depleted_enabled: bool = True         # 是否启用枯竭检测 (OCR 运行时生效)
 
 
 @dataclass
@@ -369,3 +379,13 @@ def _validate_config(config: AppConfig) -> None:
     if ocr.min_confidence < 0.0 or ocr.min_confidence > 1.0:
         ocr.min_confidence = max(0.0, min(1.0, ocr.min_confidence))
         print("[config] ocr.min_confidence 超出范围，已修正")
+    # 枯竭 ROI 范围限制
+    for attr in ("depleted_roi_x", "depleted_roi_y", "depleted_roi_width", "depleted_roi_height"):
+        v = getattr(ocr, attr)
+        if v < 0.0:
+            setattr(ocr, attr, 0.0)
+        elif v > 1.0:
+            setattr(ocr, attr, 1.0)
+    if ocr.depleted_confirm_ms < 200:
+        ocr.depleted_confirm_ms = 200
+        print("[config] ocr.depleted_confirm_ms 过小，已修正为 200ms")

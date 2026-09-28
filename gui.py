@@ -300,7 +300,11 @@ class FishingGUI:
             if self._btn_toggle is not None:
                 self._btn_toggle.config(text="恢复 (F6)")
         else:
-            self._status_var.set("● 运行中")
+            state_name = engine.get_state_name()
+            if engine.get_state() is not None and "枯竭" in state_name:
+                self._status_var.set(f"● 钓点枯竭 (已停止钓鱼)")
+            else:
+                self._status_var.set(f"● 运行中 ({state_name})")
             if self._btn_toggle is not None:
                 self._btn_toggle.config(text="暂停 (F6)")
 

@@ -21,7 +21,9 @@ from .models import OcrResult
 
 # 关键词集合 (支持 OCR 可能的误识别变体)
 _BITE_KEYWORDS: Tuple[str, ...] = ("咬钩",)
-_DEPLETED_KEYWORDS: Tuple[str, ...] = ("钓点枯竭", "钓点幹竭", "钓饵枯竭")
+# 「枯竭」是非常专一的词，单独匹配即可覆盖「鱼群：枯竭」「钓点枯竭」等所有变体，
+# 避免因 mod 文案差异 (鱼群：枯竭 / 钓点枯竭) 漏检。
+_DEPLETED_KEYWORDS: Tuple[str, ...] = ("枯竭",)
 
 # XYZ 坐标正则：匹配 "XYZ: 123.4 / 64.0 / -37.8" 或 "123.4 / 64.0 / -37.8"
 _XYZ_PATTERN = re.compile(

@@ -67,6 +67,12 @@
         "roi_width": 0.5,
         "roi_height": 0.15,
         "interval_ms": 500,
-        "min_confidence": 0.5
+        "min_confidence": 0.5,
+        "depleted_roi_x": 0.3,
+        "depleted_roi_y": 0.35,
+        "depleted_roi_width": 0.4,
+        "depleted_roi_height": 0.25,
+        "depleted_confirm_ms": 1000,
+        "depleted_enabled": true
     }
 }
