@@ -41,6 +41,14 @@ class DetectionResult:
     match_score: float                         # 模板匹配置信度 (0~1)，无模板时为 0
     bite_detected: bool
     roi_screen: Tuple[int, int, int, int]      # (x, y, w, h) 屏幕坐标
+    # ---- 阶段一：双检测点联合确认 ----
+    point_b_white_pixels: int = 0              # 检测点 B 匹配像素数
+    point_b_large_pixels: int = 0              # 检测点 B 大连通域像素数
+    point_b_component_count: int = 0           # 检测点 B 连通域数量
+    point_b_roi_screen: Tuple[int, int, int, int] = (0, 0, 0, 0)
+    point_a_passed: bool = False               # 检测点 A 单独是否通过
+    point_b_passed: bool = False               # 检测点 B 单独是否通过
+    dual_detection_used: bool = False           # 本次检测是否启用了双检测点
 
 
 class BiteDetector:
@@ -51,10 +59,12 @@ class BiteDetector:
         mc_window: MinecraftWindow,
         detection_cfg: DetectionConfig,
         roi_cfg: RoiConfig,
+        roi_b_cfg: Optional[RoiConfig] = None,
     ) -> None:
         self._mc = mc_window
         self._det_cfg = detection_cfg
         self._roi_cfg = roi_cfg
+        self._roi_b_cfg: Optional[RoiConfig] = roi_b_cfg
         self._log = get_logger()
         self._sct = mss.mss()
 
@@ -67,10 +77,17 @@ class BiteDetector:
         # 冷却结束时间 (monotonic)
         self._cooldown_until: float = 0.0
 
-    def update_config(self, detection_cfg: DetectionConfig, roi_cfg: RoiConfig) -> None:
+    def update_config(
+        self,
+        detection_cfg: DetectionConfig,
+        roi_cfg: RoiConfig,
+        roi_b_cfg: Optional[RoiConfig] = None,
+    ) -> None:
         """运行时更新检测配置"""
         self._det_cfg = detection_cfg
         self._roi_cfg = roi_cfg
+        if roi_b_cfg is not None:
+            self._roi_b_cfg = roi_b_cfg
 
     # ---------------- 模板管理 ----------------
 
@@ -171,6 +188,52 @@ class BiteDetector:
             self._log.error(f"截图失败: {e}")
             return None, None
 
+    # ---------------- 检测点 B (阶段一) ----------------
+
+    def _calc_roi_b_screen(self, win_rect: WindowRect) -> Optional[Tuple[int, int, int, int]]:
+        """根据窗口矩形和 roi_b 比例计算检测点 B 的屏幕坐标"""
+        if self._roi_b_cfg is None:
+            return None
+        if win_rect.width <= 0 or win_rect.height <= 0:
+            return None
+        x = win_rect.left + int(win_rect.width * self._roi_b_cfg.x)
+        y = win_rect.top + int(win_rect.height * self._roi_b_cfg.y)
+        w = max(1, int(win_rect.width * self._roi_b_cfg.width))
+        h = max(1, int(win_rect.height * self._roi_b_cfg.height))
+        if x < win_rect.left:
+            x = win_rect.left
+        if y < win_rect.top:
+            y = win_rect.top
+        if x + w > win_rect.right:
+            w = win_rect.right - x
+        if y + h > win_rect.bottom:
+            h = win_rect.bottom - y
+        if w <= 0 or h <= 0:
+            return None
+        return (x, y, w, h)
+
+    def capture_roi_b(self) -> Tuple[Optional[np.ndarray], Optional[Tuple[int, int, int, int]]]:
+        """截取检测点 B 区域图像 (BGR)"""
+        if self._roi_b_cfg is None:
+            return None, None
+        win_rect = self._mc.get_rect()
+        if win_rect is None:
+            return None, None
+        roi = self._calc_roi_b_screen(win_rect)
+        if roi is None:
+            return None, None
+
+        x, y, w, h = roi
+        monitor = {"left": x, "top": y, "width": w, "height": h}
+        try:
+            shot = self._sct.grab(monitor)
+            frame = np.array(shot)
+            frame = frame[:, :, :3]  # BGRA -> BGR
+            return frame, roi
+        except Exception as e:
+            self._log.error(f"检测点 B 截图失败: {e}")
+            return None, None
+
     # ---------------- 白色像素分析 (备用) ----------------
 
     def _build_white_mask(self, frame: np.ndarray) -> np.ndarray:
@@ -259,6 +322,63 @@ class BiteDetector:
 
     # ---------------- 检测入口 ----------------
 
+    def _check_point_a(self, frame: np.ndarray, roi: Tuple[int, int, int, int]) -> Tuple[bool, int, int, int, float]:
+        """
+        检测点 A 判定 (原 ROI)。
+        返回 (是否通过, 总匹配像素, 大连通域像素, 连通域数, 匹配度)。
+        """
+        cfg = self._det_cfg
+        total_white, large_white, comp_count = self.analyze_white(frame)
+
+        # 1. 模板匹配模式
+        if cfg.use_template_matching and self._template is not None:
+            score = self.match_template(frame)
+            passed = score >= cfg.template_match_threshold
+            return passed, total_white, large_white, comp_count, score
+
+        # 2. 目标颜色检测模式
+        if cfg.use_color_detection:
+            total_color, large_color, color_comps = self.analyze_color(frame)
+            roi_area = roi[2] * roi[3]
+            max_allowed = int(roi_area * cfg.max_white_ratio)
+            passed = large_color >= cfg.white_pixel_threshold and large_color <= max_allowed
+            return passed, total_color, large_color, color_comps, 0.0
+
+        # 3. 降级: 白色像素 + 连通域
+        roi_area = roi[2] * roi[3]
+        max_allowed = int(roi_area * cfg.max_white_ratio)
+        passed = large_white >= cfg.white_pixel_threshold and large_white <= max_allowed
+        return passed, total_white, large_white, comp_count, 0.0
+
+    def _check_point_b(self, frame: np.ndarray, roi: Tuple[int, int, int, int]) -> Tuple[bool, int, int, int]:
+        """
+        检测点 B 判定。使用与 A 相同的检测模式和参数。
+        返回 (是否通过, 总匹配像素, 大连通域像素, 连通域数)。
+        """
+        cfg = self._det_cfg
+
+        # 1. 模板匹配模式 (B 也做模板匹配)
+        if cfg.use_template_matching and self._template is not None:
+            score = self.match_template(frame)
+            passed = score >= cfg.template_match_threshold
+            total_white, large_white, comp_count = self.analyze_white(frame)
+            return passed, total_white, large_white, comp_count
+
+        # 2. 目标颜色检测模式
+        if cfg.use_color_detection:
+            total_color, large_color, color_comps = self.analyze_color(frame)
+            roi_area = roi[2] * roi[3]
+            max_allowed = int(roi_area * cfg.max_white_ratio)
+            passed = large_color >= cfg.white_pixel_threshold and large_color <= max_allowed
+            return passed, total_color, large_color, color_comps
+
+        # 3. 降级: 白色像素 + 连通域
+        total_white, large_white, comp_count = self.analyze_white(frame)
+        roi_area = roi[2] * roi[3]
+        max_allowed = int(roi_area * cfg.max_white_ratio)
+        passed = large_white >= cfg.white_pixel_threshold and large_white <= max_allowed
+        return passed, total_white, large_white, comp_count
+
     def detect_once(self) -> DetectionResult:
         """
         执行一次检测。
@@ -267,6 +387,9 @@ class BiteDetector:
         1. 模板匹配 (use_template_matching=True 且模板存在)
         2. 目标颜色检测 (use_color_detection=True)
         3. 白色像素 + 连通域 (降级)
+
+        阶段一：当 use_dual_detection=True 时，
+        检测点 A 和检测点 B 必须同时通过才判定咬钩。
         """
         frame, roi = self.capture_roi()
         if frame is None or roi is None:
@@ -275,48 +398,43 @@ class BiteDetector:
                 match_score=0.0, bite_detected=False, roi_screen=(0, 0, 0, 0),
             )
 
-        cfg = self._det_cfg
-        total_white, large_white, comp_count = self.analyze_white(frame)
+        # 检测点 A 判定
+        a_passed, a_total, a_large, a_comps, a_score = self._check_point_a(frame, roi)
 
-        # 1. 模板匹配模式
-        if cfg.use_template_matching and self._template is not None:
-            score = self.match_template(frame)
-            bite = score >= cfg.template_match_threshold
+        # ---- 双检测点联合确认 (阶段一) ----
+        if self._det_cfg.use_dual_detection and self._roi_b_cfg is not None:
+            frame_b, roi_b = self.capture_roi_b()
+            if frame_b is None or roi_b is None:
+                # B 截图失败，视为不通过
+                return DetectionResult(
+                    white_pixels=a_total, large_white_pixels=a_large,
+                    component_count=a_comps, match_score=a_score,
+                    bite_detected=False, roi_screen=roi,
+                    point_b_white_pixels=0, point_b_large_pixels=0,
+                    point_b_component_count=0, point_b_roi_screen=(0, 0, 0, 0),
+                    point_a_passed=a_passed, point_b_passed=False,
+                    dual_detection_used=True,
+                )
+
+            b_passed, b_total, b_large, b_comps = self._check_point_b(frame_b, roi_b)
+            # 联合判断：A 且 B 同时通过才触发
+            bite = a_passed and b_passed
             return DetectionResult(
-                white_pixels=total_white,
-                large_white_pixels=large_white,
-                component_count=comp_count,
-                match_score=score,
-                bite_detected=bite,
-                roi_screen=roi,
+                white_pixels=a_total, large_white_pixels=a_large,
+                component_count=a_comps, match_score=a_score,
+                bite_detected=bite, roi_screen=roi,
+                point_b_white_pixels=b_total, point_b_large_pixels=b_large,
+                point_b_component_count=b_comps, point_b_roi_screen=roi_b,
+                point_a_passed=a_passed, point_b_passed=b_passed,
+                dual_detection_used=True,
             )
 
-        # 2. 目标颜色检测模式
-        if cfg.use_color_detection:
-            total_color, large_color, color_comps = self.analyze_color(frame)
-            roi_area = roi[2] * roi[3]
-            max_allowed = int(roi_area * cfg.max_white_ratio)
-            bite = large_color >= cfg.white_pixel_threshold and large_color <= max_allowed
-            return DetectionResult(
-                white_pixels=total_color,       # 复用字段显示匹配像素数
-                large_white_pixels=large_color,  # 复用字段显示大连通域匹配数
-                component_count=color_comps,
-                match_score=0.0,
-                bite_detected=bite,
-                roi_screen=roi,
-            )
-
-        # 3. 降级: 白色像素 + 连通域
-        roi_area = roi[2] * roi[3]
-        max_allowed = int(roi_area * cfg.max_white_ratio)
-        bite = large_white >= cfg.white_pixel_threshold and large_white <= max_allowed
+        # 单检测点模式 (原有逻辑)
         return DetectionResult(
-            white_pixels=total_white,
-            large_white_pixels=large_white,
-            component_count=comp_count,
-            match_score=0.0,
-            bite_detected=bite,
-            roi_screen=roi,
+            white_pixels=a_total, large_white_pixels=a_large,
+            component_count=a_comps, match_score=a_score,
+            bite_detected=a_passed, roi_screen=roi,
+            point_a_passed=a_passed, dual_detection_used=False,
         )
 
     def detect_bite(self) -> DetectionResult:

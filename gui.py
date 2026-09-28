@@ -147,9 +147,19 @@ class FishingGUI:
             row3, text="取色+模板一次完成", foreground="gray",
         ).pack(side="left", padx=4)
 
+        # 第四行：选择检测点 B (阶段一双检测点)
+        row4 = ttk.Frame(btn_frame)
+        row4.pack(fill="x", pady=2)
+        ttk.Button(
+            row4, text="检测点B (F12)", command=self._on_select_region_b, width=18,
+        ).pack(side="left", padx=2)
+        ttk.Label(
+            row4, text="启用双检测点联合确认", foreground="gray",
+        ).pack(side="left", padx=4)
+
         # ---- 快捷键提示 ----
         tip = (
-            "快捷键: F6 开始/暂停 | F7 停止 | F8 选区域 | F9 测试 | F10 截取咬钩\n"
+            "快捷键: F6 开始/暂停 | F7 停止 | F8 选区域 | F9 测试 | F10 截取咬钩 | F12 检测点B\n"
             "失焦保护: 切到其他窗口自动暂停，切回 Minecraft 等 3 秒自动恢复"
         )
         ttk.Label(frm, text=tip, foreground="gray", justify="left").pack(anchor="w")
@@ -176,6 +186,9 @@ class FishingGUI:
 
     def _on_capture_template(self) -> None:
         self._app._task_queue.put("capture_template")
+
+    def _on_select_region_b(self) -> None:
+        self._app._task_queue.put("select_region_b")
 
     def _on_close(self) -> None:
         self._app._shutdown()
@@ -234,6 +247,9 @@ class FishingGUI:
                 self._update_info_text()
             elif task == "pick_color":
                 self._app._do_pick_color()
+                self._update_info_text()
+            elif task == "select_region_b":
+                self._app._do_select_region_b()
                 self._update_info_text()
         except Exception as exc:
             self._app._log.error(f"任务执行失败 [{task}]: {exc}")
@@ -342,6 +358,15 @@ class FishingGUI:
             f"ROI: x={roi.x:.3f} y={roi.y:.3f} "
             f"w={roi.width:.3f} h={roi.height:.3f}"
         )
+
+        # 双检测点状态 (阶段一)
+        if det.use_dual_detection:
+            roi_b = self._app._config.roi_b
+            self._roi_var.set(
+                self._roi_var.get()
+                + f"  | 检测点B: x={roi_b.x:.3f} y={roi_b.y:.3f} "
+                f"w={roi_b.width:.3f} h={roi_b.height:.3f} (双检测已启用)"
+            )
 
         # 参数：拉鱼改为右键单击一次，不再需要持续时间/间隔参数
         self._params_var.set(

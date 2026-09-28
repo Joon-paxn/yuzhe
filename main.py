@@ -72,7 +72,7 @@ class AutoFishingApp:
 
         # 2. 初始化各模块
         self._detector = BiteDetector(
-            self._mc, self._config.detection, self._config.roi
+            self._mc, self._config.detection, self._config.roi, self._config.roi_b
         )
         self._input = InputController(self._mc)
         self._engine = FishingEngine(
@@ -87,6 +87,7 @@ class AutoFishingApp:
         self._hotkeys.on_test = lambda: self._task_queue.put("test")
         self._hotkeys.on_capture_template = lambda: self._task_queue.put("capture_template")
         self._hotkeys.on_pick_color = lambda: self._task_queue.put("pick_color")
+        self._hotkeys.on_select_region_b = lambda: self._task_queue.put("select_region_b")
 
         if not self._hotkeys.register():
             self._log.error("快捷键注册失败，程序退出")
@@ -164,7 +165,7 @@ class AutoFishingApp:
         save_config(CONFIG_PATH, self._config)
 
         if self._detector is not None:
-            self._detector.update_config(self._config.detection, self._config.roi)
+            self._detector.update_config(self._config.detection, self._config.roi, self._config.roi_b)
 
         self._log.success(
             f"检测区域已保存: x={x:.4f}, y={y:.4f}, "
@@ -207,14 +208,24 @@ class AutoFishingApp:
                 last_log = now
                 status = "检测到咬钩！" if result.bite_detected else "未检测到咬钩"
                 mode = self._detector.get_mode_name()
-                self._log.test(
-                    f"[{mode}] "
-                    f"匹配度={result.match_score:.3f} | "
-                    f"总白={result.white_pixels} | "
-                    f"大连通域白={result.large_white_pixels} | "
-                    f"连通域数={result.component_count} | "
-                    f"状态={status}"
-                )
+                if result.dual_detection_used:
+                    a_status = "通过" if result.point_a_passed else "未通过"
+                    b_status = "通过" if result.point_b_passed else "未通过"
+                    self._log.test(
+                        f"[{mode}+双检测] "
+                        f"A:{a_status}({result.large_white_pixels}px) | "
+                        f"B:{b_status}({result.point_b_large_pixels}px) | "
+                        f"状态={status}"
+                    )
+                else:
+                    self._log.test(
+                        f"[{mode}] "
+                        f"匹配度={result.match_score:.3f} | "
+                        f"总白={result.white_pixels} | "
+                        f"大连通域白={result.large_white_pixels} | "
+                        f"连通域数={result.component_count} | "
+                        f"状态={status}"
+                    )
 
             # 检查是否有新任务 (例如用户再次按 F9/F8/F10)
             try:
@@ -291,7 +302,7 @@ class AutoFishingApp:
         self._config.detection.use_color_detection = True
         save_config(CONFIG_PATH, self._config)
         if self._detector is not None:
-            self._detector.update_config(self._config.detection, self._config.roi)
+            self._detector.update_config(self._config.detection, self._config.roi, self._config.roi_b)
         self._log.success(f"已取色 RGB({r},{g},{b})，颜色检测已启用")
 
         # 第二步：截取 ROI 为模板（此时咬钩仍在屏幕上）
@@ -309,6 +320,38 @@ class AutoFishingApp:
     def _do_pick_color(self) -> None:
         """F11: 已合并到 F10（取色 + 截模板一次完成）。保留入口避免旧配置报错。"""
         self._do_capture_template()
+
+    def _do_select_region_b(self) -> None:
+        """F12: 选择第二个检测点 B 区域，并自动启用双检测点联合确认。"""
+        if self._engine is not None and self._engine.is_running():
+            self._log.warn("请先停止自动钓鱼 (F7) 再选择检测点 B")
+            return
+
+        self._log.info("进入检测点 B 区域选择模式...")
+        self._log.info("请在弹出的全屏截图中框住第二个「咬钩！」文字检测区域")
+
+        if not self._mc.is_valid():
+            if not self._mc.find():
+                self._log.error("Minecraft 窗口无效，无法选择检测点 B")
+                return
+
+        result = select_roi_relative(self._mc)
+        if result is None:
+            return
+
+        x, y, w, h = result
+        self._config.roi_b = RoiConfig(x=x, y=y, width=w, height=h)
+        # 自动启用双检测点联合确认
+        self._config.detection.use_dual_detection = True
+        save_config(CONFIG_PATH, self._config)
+
+        if self._detector is not None:
+            self._detector.update_config(self._config.detection, self._config.roi, self._config.roi_b)
+
+        self._log.success(
+            f"检测点 B 已保存: x={x:.4f}, y={y:.4f}, "
+            f"w={w:.4f}, h={h:.4f} | 双检测点联合确认已启用"
+        )
 
     # ---------------- 退出与清理 ----------------
 
@@ -342,10 +385,11 @@ class AutoFishingApp:
         self._log.info("  F8  - 重新选择「咬钩！」检测区域")
         self._log.info("  F9  - 测试当前检测区域")
         self._log.info("  F10 - 截取咬钩 (取色 + 模板一次完成，出现咬钩时按)")
+        self._log.info("  F12 - 选择第二个检测点 B 区域 (启用双检测点联合确认)")
         self._log.info("  Ctrl+C - 退出程序")
         self._log.info(
             "使用流程: F8选区域 -> 抛竿等「咬钩！」出现 -> "
-            "F10截取咬钩 -> F9测试 -> F6开始"
+            "F10截取咬钩 -> F12选检测点B(可选,降低误触发) -> F9测试 -> F6开始"
         )
         self._log.info(
             "失焦保护: 切换到其他窗口会自动暂停，切回 Minecraft 等 3 秒自动恢复"
