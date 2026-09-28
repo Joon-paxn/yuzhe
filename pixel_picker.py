@@ -10,8 +10,8 @@ pixel_picker.py
 - 左键点击：确认选取该像素颜色并返回。
 - 右键点击 / Esc：取消并返回 None。
 
-用于让用户精确指定「咬钩！」文字中某个像素的颜色，
-之后检测器就以该颜色 (含容差) 为目标进行检测。
+支持一次会话内连续取多个颜色 (F10 双重取色用)，
+在同一个 Tk 根窗口内依次取色，避免多次创建/销毁 Tk 导致第二个窗口不显示。
 """
 
 from __future__ import annotations
@@ -32,40 +32,44 @@ CROSS_SIZE = 12          # 十字准星半长
 MAGNIFY_OFFSET = 20      # 放大镜相对光标的偏移 (避免挡住光标)
 
 
-def pick_pixel_color(hint: str = "左键取色  |  右键 / Esc 取消") -> Optional[Tuple[int, int, int]]:
+def pick_pixel_colors(hints: list) -> list:
     """
-    启动全屏取色器，返回用户点击位置的像素 RGB 值。
+    启动一次全屏取色会话，连续取多个颜色。
+
+    在同一个 Tk 根窗口内依次取色，避免多次创建/销毁 Tk 导致的窗口不显示问题。
+    每取完一个，顶部提示自动切换为下一个，取完所有或中途取消即退出。
 
     Args:
-        hint: 顶部提示文字 (用于区分多重取色，如 "取色 A 点" / "取色 B 点")。
+        hints: 每次取色的提示文字列表，长度即取色次数
+               (如 ["取色 A 点...", "取色 B 点..."])
 
     Returns:
-        (R, G, B) 元组；右键 / Esc / 关闭窗口时返回 None。
+        与 hints 等长的列表，每项为 (R,G,B) 元组；中途取消时剩余项为 None。
     """
-    result: dict = {"color": None, "cancelled": False}
+    n = len(hints)
+    if n == 0:
+        return []
+    results = [None] * n
+    state_idx = {"i": 0}  # 当前要取的是第几个
 
-    # 1. 截取全屏
+    # 1. 截取全屏 (整个会话复用同一张截图，保证 A/B 来自同一帧)
     try:
         with mss.mss() as sct:
-            monitor = sct.monitors[0]  # 所有显示器组合的虚拟屏幕
+            monitor = sct.monitors[0]
             shot = sct.grab(monitor)
             screen_w, screen_h = shot.size
-            # 保存原始像素数组用于取色 (BGRA)
             raw = np.array(shot)
-            # RGB 图像用于背景显示
             img = Image.frombytes("RGB", shot.size, shot.rgb)
     except Exception as e:
         print(f"[pixel_picker] 全屏截图失败: {e}")
-        return None
+        return results
 
-    # 2. 创建全屏覆盖窗口
+    # 2. 创建全屏覆盖窗口 (整个会话只创建一次)
     root = tk.Tk()
     root.attributes("-fullscreen", True)
     root.attributes("-topmost", True)
     root.configure(cursor="cross")
-    # 确保窗口获得焦点，接收键盘事件
     root.focus_force()
-    # 强制接管输入，防止焦点被 Minecraft 等其他窗口抢走
     root.grab_set()
 
     photo = ImageTk.PhotoImage(img, master=root)
@@ -77,28 +81,29 @@ def pick_pixel_color(hint: str = "左键取色  |  右键 / Esc 取消") -> Opti
     canvas.create_image(0, 0, image=photo, anchor="nw")
     canvas.image = photo  # 防止 GC
 
-    # 提示文字
+    # 提示文字 (随取色进度切换)
     hint_id = canvas.create_text(
         screen_w // 2, 30,
-        text=hint,
+        text=hints[0],
         fill="yellow", font=("Microsoft YaHei", 18, "bold"),
     )
+    # 进度文字
+    prog_id = canvas.create_text(
+        screen_w // 2, 58,
+        text=f"第 1 / {n} 点",
+        fill="lime", font=("Microsoft YaHei", 13, "bold"),
+    )
 
-    # 状态
+    # 放大镜状态
     state = {
-        "mag_img": None,       # 放大镜 PhotoImage 引用
-        "mag_rect_id": None,   # 放大镜背景矩形 id
-        "mag_img_id": None,    # 放大镜图像 id
-        "cross_h": None,       # 十字准星横线 id
-        "cross_v": None,       # 十字准星竖线 id
-        "info_id": None,       # RGB 文字 id
+        "mag_img": None, "mag_rect_id": None, "mag_img_id": None,
+        "cross_h": None, "cross_v": None, "info_id": None,
     }
 
     def get_cursor_xy(_event) -> Tuple[int, int]:
         """获取鼠标在屏幕上的坐标 (与截图坐标一致)"""
         x = root.winfo_pointerx()
         y = root.winfo_pointery()
-        # 限制在屏幕范围内
         x = max(0, min(screen_w - 1, x))
         y = max(0, min(screen_h - 1, y))
         return x, y
@@ -111,7 +116,6 @@ def pick_pixel_color(hint: str = "左键取色  |  右键 / Esc 取消") -> Opti
 
     def draw_magnifier(x: int, y: int) -> None:
         """在光标旁绘制放大镜 + RGB 信息"""
-        # 放大镜位置：尽量放在光标右下方，超出屏幕则翻到另一侧
         mx = x + MAGNIFY_OFFSET
         my = y + MAGNIFY_OFFSET
         if mx + MAGNIFY_SIZE > screen_w:
@@ -121,7 +125,6 @@ def pick_pixel_color(hint: str = "左键取色  |  右键 / Esc 取消") -> Opti
         mx = max(0, mx)
         my = max(0, my)
 
-        # 截取光标周围的小区域并放大
         half = MAGNIFY_SIZE // (2 * MAGNIFY_ZOOM)
         crop_x1 = max(0, x - half)
         crop_y1 = max(0, y - half)
@@ -137,7 +140,6 @@ def pick_pixel_color(hint: str = "左键取色  |  右键 / Esc 取消") -> Opti
             if item is not None:
                 canvas.delete(item)
 
-        # 放大镜背景框 (黄色边框)
         state["mag_rect_id"] = canvas.create_rectangle(
             mx, my, mx + MAGNIFY_SIZE, my + MAGNIFY_SIZE,
             outline="yellow", width=2,
@@ -146,19 +148,15 @@ def pick_pixel_color(hint: str = "左键取色  |  右键 / Esc 取消") -> Opti
             mx, my, image=state["mag_img"], anchor="nw",
         )
 
-        # 十字准星 (放大镜中心)
         cx = mx + MAGNIFY_SIZE // 2
         cy = my + MAGNIFY_SIZE // 2
         state["cross_h"] = canvas.create_line(
-            cx - CROSS_SIZE, cy, cx + CROSS_SIZE, cy,
-            fill="red", width=1,
+            cx - CROSS_SIZE, cy, cx + CROSS_SIZE, cy, fill="red", width=1,
         )
         state["cross_v"] = canvas.create_line(
-            cx, cy - CROSS_SIZE, cx, cy + CROSS_SIZE,
-            fill="red", width=1,
+            cx, cy - CROSS_SIZE, cy + CROSS_SIZE, fill="red", width=1,
         )
 
-        # RGB 信息
         r, g, b = pixel_rgb(x, y)
         state["info_id"] = canvas.create_text(
             mx + MAGNIFY_SIZE // 2, my + MAGNIFY_SIZE + 14,
@@ -171,26 +169,32 @@ def pick_pixel_color(hint: str = "左键取色  |  右键 / Esc 取消") -> Opti
         draw_magnifier(x, y)
 
     def on_pick(event) -> None:
-        """左键确认取色"""
+        """左键确认当前点；取完最后一个才关闭，否则切到下一个提示"""
         x, y = get_cursor_xy(event)
-        result["color"] = pixel_rgb(x, y)
-        root.destroy()
+        results[state_idx["i"]] = pixel_rgb(x, y)
+        state_idx["i"] += 1
+        if state_idx["i"] >= n:
+            root.destroy()
+        else:
+            canvas.itemconfig(hint_id, text=hints[state_idx["i"]])
+            canvas.itemconfig(prog_id, text=f"第 {state_idx['i'] + 1} / {n} 点")
 
     def on_cancel(_event=None) -> None:
-        """右键 / Esc 取消"""
-        result["color"] = None
-        result["cancelled"] = True
+        """右键 / Esc / 关闭：结束会话，剩余项保持 None"""
         root.destroy()
 
     # 事件绑定 (绑定到全屏 canvas，确保一定能收到)
     canvas.bind("<Motion>", on_motion)
     canvas.bind("<Button-1>", on_pick)
     canvas.bind("<Button-3>", on_cancel)
-    # Esc 同时绑定到 root 和 canvas，避免焦点落在 canvas 时 root 收不到
     root.bind("<Escape>", on_cancel)
     canvas.bind("<Escape>", on_cancel)
-    # 窗口关闭按钮也作为取消
     root.protocol("WM_DELETE_WINDOW", on_cancel)
 
     root.mainloop()
-    return result["color"]
+    return results
+
+
+def pick_pixel_color(hint: str = "左键取色  |  右键 / Esc 取消") -> Optional[Tuple[int, int, int]]:
+    """单次取色 (F11 用)。等价于 pick_pixel_colors([hint])[0]。"""
+    return pick_pixel_colors([hint])[0]

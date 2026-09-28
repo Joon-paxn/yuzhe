@@ -27,7 +27,7 @@ from hotkeys import HotkeyManager
 from input_controller import InputController
 from minecraft_window import MinecraftWindow
 from region_selector import select_roi_relative
-from pixel_picker import pick_pixel_color
+from pixel_picker import pick_pixel_color, pick_pixel_colors
 from gui import FishingGUI
 from logger import get_logger
 
@@ -292,19 +292,17 @@ class AutoFishingApp:
             return
 
         self._log.info("=== 截取咬钩（双重取色 A+B + 模板）===")
+        self._log.info("即将弹出取色器：先取 A 点，再取 B 点 (右键/Esc 取消)")
 
-        # 第一步：取色 A 点
-        self._log.info("取色 A 点：移动到「咬钩！」文字主体像素，左键确认")
-        color_a = pick_pixel_color("取色 A 点：移动到「咬钩！」文字主体，左键确认  |  右键/Esc 取消")
-        if color_a is None:
-            self._log.info("已取消 A 点取色，未做任何更改")
-            return
-
-        # 第二步：取色 B 点
-        self._log.info("取色 B 点：移动到「咬钩！」文字描边或另一处像素，左键确认")
-        color_b = pick_pixel_color("取色 B 点：移动到「咬钩！」描边/另一像素，左键确认  |  右键/Esc 取消")
-        if color_b is None:
-            self._log.info("已取消 B 点取色，未做任何更改")
+        # 第一步 + 第二步：一次会话内连续取 A、B 两色
+        colors = pick_pixel_colors([
+            "取色 A 点：移动到「咬钩！」文字主体，左键确认  |  右键/Esc 取消",
+            "取色 B 点：移动到「咬钩！」描边/另一像素，左键确认  |  右键/Esc 取消",
+        ])
+        color_a = colors[0]
+        color_b = colors[1]
+        if color_a is None or color_b is None:
+            self._log.info("已取消取色，未做任何更改")
             return
 
         ra, ga, ba = color_a
