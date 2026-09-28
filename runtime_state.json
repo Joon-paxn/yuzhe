@@ -1,0 +1,354 @@
+{
+  "spots": {
+    "map1_0": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_1": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_2": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_3": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_4": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_5": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_6": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_7": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_8": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_9": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_10": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_11": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_12": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_13": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_14": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_15": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_16": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_17": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_18": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_19": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_20": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_21": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_22": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_23": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_24": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_25": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_26": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_27": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_28": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_29": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_30": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_31": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_32": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_33": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_34": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_35": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_36": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_37": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_38": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_39": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_40": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_41": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_42": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_43": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_44": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_45": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_46": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_47": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_48": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    },
+    "map1_49": {
+      "status": "unknown",
+      "last_visited": null,
+      "visit_count": 0,
+      "fail_count": 0,
+      "success_rate": 0.0
+    }
+  }
+}

@@ -1,21 +1,11 @@
-"""navigation 导航层 (阶段五+)
-
-阶段五：世界地图模型 (map.py)
-阶段六：移动规划 (movement.py) — 路径→按键序列
-阶段七：A*/2.5D 寻路 (pathfinding.py)
-阶段八：自动寻找新钓点编排 (navigator.py)
-"""
-from navigation.map import (
-    ExploredRegion, FishingSpot, Obstacle, PlayerPosition, WaterArea, WorldMap,
-)
-from navigation.movement import MoveAction, MoveActionType, MovementPlanner
-from navigation.pathfinding import AStarPathfinder, PathNode, PathfindingGrid
-from navigation.navigator import Navigator, NavigatorState, NavigationOutcome
+from .position import DynamicPositioning, StandCandidate
+from .recovery import RecoveryEngine, StuckLevel, RecoveryAction, RecoveryResult
+from .route_memory import RouteMemory, RouteRecord
+from .engine import NavigationEngine, NavState2, NavResult, ArrivalVerifier
 
 __all__ = [
-    "ExploredRegion", "FishingSpot", "Obstacle", "PlayerPosition",
-    "WaterArea", "WorldMap",
-    "MoveAction", "MoveActionType", "MovementPlanner",
-    "PathNode", "PathfindingGrid", "AStarPathfinder",
-    "Navigator", "NavigatorState", "NavigationOutcome",
+    "DynamicPositioning", "StandCandidate",
+    "RecoveryEngine", "StuckLevel", "RecoveryAction", "RecoveryResult",
+    "RouteMemory", "RouteRecord",
+    "NavigationEngine", "NavState2", "NavResult", "ArrivalVerifier",
 ]

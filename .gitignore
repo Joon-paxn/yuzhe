@@ -1,33 +1,5 @@
-# Python
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
-*.egg-info/
-dist/
-build/
-.eggs/
-
-# 虚拟环境
-venv/
-.venv/
-env/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# 配置和数据 (含个人取色/区域设置，按需保留)
-# config.json  # 如需共享默认配置可取消注释
-
-# 日志
-*.log
-
-# 截图和模板 (个人环境相关)
-# bite_template.png  # 如需共享可取消注释
-
-# 系统
-.DS_Store
-Thumbs.db
+*.pyc
+*.pyo
+.runtime_state.json
+.runtime_route_memory.json

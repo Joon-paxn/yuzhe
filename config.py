@@ -1,572 +1,66 @@
-"""
-config.py
----------
-配置文件加载与保存模块。
-
-所有可调参数集中在 config.json 中，避免硬编码。
-ROI 以相对于 Minecraft 窗口的比例保存，使检测区域随窗口缩放自适应。
-"""
-
+"""配置。"""
 from __future__ import annotations
 
 import json
-import os
-from dataclasses import dataclass, field, asdict, fields
-from typing import Any, Dict, Tuple
-
-
-@dataclass
-class WindowConfig:
-    """Minecraft 窗口相关配置"""
-    title_keyword: str = "Minecraft"
-    check_interval_ms: int = 2000
-    # 借鉴 Tau-main：是否使用 PrintWindow 后台抓图 (窗口被遮挡也能截到游戏画面)
-    grab_from_window: bool = False
-    # 借鉴 Tau-main：输入模式 "global"(pyautogui 全局，需前台) / "window"(PostMessageW 后台)
-    input_mode: str = "global"
-    # 借鉴 Tau-main：游戏日志监听 (检测枯竭等)，路径为空则不启用
-    log_watch_path: str = ""
-    log_watch_interval_ms: int = 300
-    log_watch_enabled: bool = False
+from dataclasses import dataclass, field
+from typing import Optional
 
 
 @dataclass
 class FishingConfig:
-    """钓鱼时间参数配置"""
-    # 拉鱼阶段已改为「咬钩后右键单击一次收竿」，
-    # 以下两个参数保留仅为向后兼容，当前不再使用。
-    pull_interval_ms: int = 100        # (已弃用) 原左键连点间隔
-    pull_duration_ms: int = 3500       # (已弃用) 原拉鱼持续时间
-    recast_delay_min_ms: int = 1000    # 重新抛竿等待下限
-    recast_delay_max_ms: int = 5000    # 重新抛竿等待上限
-
-
-@dataclass
-class DetectionConfig:
-    """咬钩检测配置"""
-    # ---- 阶段二：检测策略 ----
-    # "rgb"     : 仅 RGB 双检测点 (默认，现有行为)
-    # "ocr"     : 仅 OCR 文字识别「咬钩」
-    # "hybrid"  : RGB 双检测点先发现候选，OCR 在时间窗口内确认
-    mode: str = "rgb"
-    ocr_confirm_window_ms: int = 1200     # hybrid: OCR 确认时间窗口
-    use_template_matching: bool = False  # 是否使用模板匹配
-    template_match_threshold: float = 0.80  # 模板匹配置信度阈值 (0~1)
-    use_color_detection: bool = False    # 是否使用目标颜色检测 (取色器选取)
-    target_color: Tuple[int, int, int] = (255, 255, 255)  # 目标颜色 A 点 RGB
-    target_color_b: Tuple[int, int, int] = (255, 255, 255)  # 目标颜色 B 点 RGB (双重取色)
-    use_dual_color: bool = False         # 启用双重取色混合判断 (A 且 B 同时通过才触发)
-    color_tolerance: int = 30            # 颜色匹配容差 (每个通道)
-    white_threshold: int = 235           # 单通道白色阈值 (R/G/B 均需大于此值)
-    white_pixel_threshold: int = 800     # 大连通域白色像素数量阈值
-    min_component_size: int = 50         # 最小连通域面积 (小于此值的白色区域视为噪点)
-    max_white_ratio: float = 0.6         # 白色像素占 ROI 面积的最大比例 (防止白屏误触发)
-    bite_confirm_frames: int = 3         # 连续确认帧数
-    bite_cooldown_ms: int = 1500         # 咬钩冷却时间，防止重复触发
-    screenshot_interval_ms: int = 50     # 截图检测间隔
-    # ---- 阶段二：A/B 检测点屏幕坐标 (相对 Minecraft 窗口比例) ----
-    # 由 F10 取色时同时记录，用于自适应模型每帧采样固定点 RGB。
-    # None 表示未设置；启用 adaptive_rgb 时必须已设置。
-    point_a_ratio: Tuple[float, float] = (0.0, 0.0)  # (rx, ry) 相对窗口比例
-    point_b_ratio: Tuple[float, float] = (0.0, 0.0)
-    points_ratio_set: bool = False        # A/B 坐标是否已设置
-
-
-@dataclass
-class AdaptiveRGBConfig:
-    """自适应 RGB 颜色模型配置 (阶段二 Beta)"""
-    enabled: bool = False                  # 是否启用自适应模型 (关闭则走阶段一色差掩膜计数)
-    max_samples: int = 50                  # 历史样本最大数量
-    min_samples: int = 5                   # 冷启动所需最小样本数
-    min_tolerance: int = 8                # 单通道最小容差
-    max_tolerance: int = 40               # 单通道最大容差
-    outlier_threshold: float = 2.0        # 异常过滤阈值倍数 (新样本与 Reference 差 > 此值 * tolerance 视为异常)
-
-
-@dataclass
-class OcrConfig:
-    """OCR 识别层配置 (阶段一基础框架)
-
-    OCR ROI 以相对 Minecraft 窗口的归一化坐标保存，适配不同分辨率与窗口位置。
-    enabled=False 时后台 OCR 服务不启动，现有钓鱼检测逻辑完全不受影响。
-
-    阶段三：新增独立的「枯竭检测 ROI」(鱼群：枯竭面板位于屏幕中部，
-    与底部咬钩文字位置不同)，以及枯竭确认时间。
-    """
-    enabled: bool = False                 # 是否启用 OCR 服务 (默认关闭，保持现有行为)
-    roi_x: float = 0.25                   # 咬钩 OCR 检测区域 x (相对窗口比例)
-    roi_y: float = 0.55                   # 咬钩 OCR 检测区域 y
-    roi_width: float = 0.50               # 咬钩 OCR 检测区域 width
-    roi_height: float = 0.15              # 咬钩 OCR 检测区域 height
-    interval_ms: int = 500                # 后台 OCR 识别间隔 (毫秒)
-    min_confidence: float = 0.5           # 识别置信度下限 (低于此值的行丢弃)
-    # ---- 阶段三：钓点枯竭检测 ----
-    depleted_roi_x: float = 0.30          # 枯竭面板 ROI x (屏幕中部)
-    depleted_roi_y: float = 0.35          # 枯竭面板 ROI y
-    depleted_roi_width: float = 0.40      # 枯竭面板 ROI width
-    depleted_roi_height: float = 0.25     # 枯竭面板 ROI height
-    depleted_confirm_ms: int = 1000       # 枯竭持续确认时间 (毫秒，避免闪烁误判)
-    depleted_enabled: bool = True         # 是否启用枯竭检测 (OCR 运行时生效)
-    # ---- 左下角 F3 坐标识别 ----
-    coord_roi_x: float = 0.0              # 坐标 ROI x (左下角)
-    coord_roi_y: float = 0.93             # 坐标 ROI y (底部)
-    coord_roi_width: float = 0.22         # 坐标 ROI width
-    coord_roi_height: float = 0.05        # 坐标 ROI height
-    coord_enabled: bool = False           # 是否启用坐标识别 (需开启 F3)
-
-
-@dataclass
-class VisionConfig:
-    """视觉识别层配置 (阶段四)
-
-    水域检测基于 OpenCV HSV 阈值分割 + 连通域分析。
-    HSV 使用 OpenCV 标度：H∈[0,179] S/V∈[0,255]。
-    默认阈值针对青蓝色调水域 (本服水面 hue≈170-200° → OpenCV H 85-100)，
-    光照/资源包不同时需校准。enabled=False 时视觉层不运行，不影响现有功能。
-    """
-    enabled: bool = False                 # 是否启用视觉识别 (默认关闭)
-    # 水域 HSV 阈值 (OpenCV 标度)
-    water_h_low: int = 85                 # 水色色相下界 (≈170°)
-    water_h_high: int = 110               # 水色色相上界 (≈220°，含偏蓝水)
-    water_s_low: int = 40                 # 饱和度下界 (排除近灰石头)
-    water_s_high: int = 255
-    water_v_low: int = 40                 # 明度下界 (排除纯黑阴影)
-    water_v_high: int = 240               # 明度上界 (排除纯白反光)
-    min_water_area: int = 500             # 水域连通域最小像素面积 (过滤噪点)
-    min_texture_std: int = 15             # 水域纹理标准差下限 (水面有网格纹理，平滑天空会被拒绝)
-    analyze_terrain: bool = True          # 是否分析地形 (草地/沙/石/障碍)
-    min_obstacle_area: int = 200          # 障碍连通域最小像素面积
-
-
-@dataclass
-class MapConfig:
-    """世界地图配置 (阶段五)
-
-    地图模型记录玩家位置、已知钓点 (used/depleted)、已探索区域、已知水域/障碍。
-    边探索边建图；钓点按位置去重；支持 JSON 持久化以跨会话保留探索成果。
-    """
-    spot_dedup_distance: float = 3.0      # 钓点去重距离 (方块，小于此距离视为同一钓点)
-    persistence_path: str = "world_map.json"  # 地图持久化文件
-    auto_save: bool = True                # 修改后是否自动保存
+    polling_rate: int = 50          # ms
+    polling_jitter: int = 50        # ms
+    color_tolerance: int = 10
+    no_fish_timeout: int = 30       # s
+    confirmation_time: float = 0.3  # s
+    reel_wait_min: float = 4.0
+    reel_wait_max: float = 6.0
+    cast_delay_min: float = 0.1
+    cast_delay_max: float = 0.4
+    px_color: str = "#FFFFFF"
+    m_pos: Optional[list] = None    # [x, y] 咬钩像素
+    auto_throw: bool = True
 
 
 @dataclass
 class NavigationConfig:
-    """导航与移动配置 (阶段六~九)
-
-    控制自动寻找新钓点时的移动/探索/寻路参数。
-    enabled=False 时 DEPLETED 状态不触发自动寻路，保持原有「停止钓鱼」行为。
-    """
-    enabled: bool = False                 # 是否启用自动寻找新钓点 (阶段六~九)
-    # 移动参数
-    move_step_s: float = 0.5              # 单步移动按住时间 (秒)
-    turn_step_px: int = 80                # 单次视角旋转步长 (像素)
-    turn_max_px: int = 400                # 单次旋转最大像素 (防过大)
-    # 探索参数
-    search_max_turns: int = 8             # 寻找水域时最多旋转次数 (每步 turn_step_px)
-    search_max_steps: int = 20            # 探索时最多前进步数
-    arrival_water_area_ratio: float = 0.15  # 水域占画面比例达此值视为到达水域
-    arrival_min_confidence: float = 0.4   # 候选钓点最低置信度
-    # 寻路参数
-    pathfind_grid_size: float = 1.0       # A* 网格分辨率 (方块)
-    pathfind_max_steps: int = 500         # A* 最大搜索步数 (防超时)
-    pathfind_step_duration_s: float = 0.5  # 每步移动按住时间
-    # 卡死检测 (借鉴 Tau-main)：水域占比变化小于此阈值视为未移动
-    stuck_ratio_threshold: float = 0.02    # 水域占比变化下限 (低于此视为卡住)
-    stuck_trigger_count: int = 3           # 连续卡住次数达此值触发避障
-    evasion_back_time: float = 0.8         # 避障后退时长 (秒)
-    evasion_turn_px: int = 200             # 避障转向像素
-    # ---- 移植 Tau-main：角度旋转参数 ----
-    dpi: float = 1320.0                    # 鼠标 DPI (用于 deg_per_pixel 计算)
-    sensitivity: float = 95.0              # MC 灵敏度 (0~100)
-    deg_per_pixel_factor: float = 0.15     # 度/像素 换算系数
-    deg_per_pixel_override: float = 0.0    # 手动覆盖 deg_per_pixel (0=自动)
-    angle_tolerance: float = 1.0           # 角度旋转容差 (度)
-    max_rotation_attempts: int = 3         # 旋转最大重试次数
-    rotation_retry_delay: float = 0.05     # 旋转重试间隔 (秒)
-    mouse_move_multiplier: float = 1.0     # 鼠标移动倍率
-    mouse_move_step: int = 20              # 步进式鼠标每步像素
-    mouse_move_delay: float = 0.005        # 步进式鼠标每步延迟 (秒)
-    # ---- 移植 Tau-main：T/I 循环导航参数 ----
-    player_speed: float = 5.625            # 玩家移动速度 (格/秒)
-    arrival_dist: float = 1.5              # 到达判定距离 (格)
-    t_to_i_distance: float = 15.0          # T→I 循环切换距离 (格)
-    per_check: float = 1.0                 # T 循环每次检查间隔 (秒)
-    i_loop_max_iter: int = 10              # I 循环最大迭代次数
-    walk_time_factor: float = 0.9          # I 循环步行时间系数
-    i_loop_min_walk_time: float = 0.05     # I 循环最小单步时间 (秒)
-    i_loop_max_walk_time: float = 1.0      # I 循环最大单步时间 (秒)
-    i_loop_post_walk_delay: float = 0.2    # I 循环每步后延迟 (秒)
-    i_loop_adaptive_ratio: float = 0.6     # I 循环自适应步长比例
-    i_loop_adaptive_max_walk: float = 2.0  # I 循环自适应最大步长 (秒)
-    # ---- 移植 Tau-main：卡死/避障参数 ----
-    stuck_threshold: float = 0.15          # 位置变化小于此值视为卡住 (格)
-    evasion_short_max: float = 3.0         # 避障短侧移最大时长 (秒)
-    evasion_long_min: float = 3.0          # 避障长侧移最小时长 (秒)
-    evasion_long_max: float = 5.0          # 避障长侧移最大时长 (秒)
-    evasion_short_probability: float = 0.8 # 避障短侧移概率
-    evasion_cycle_interval: int = 3        # 每 N 次避障强制长侧移
-    # ---- 移植 Tau-main：水上浮/禁区参数 ----
-    water_float_timeout: float = 2.0       # 上浮超时 (秒)
-    float_pitch_angle: float = 45.0        # 上浮时俯仰上抬角度
-    float_check_interval: float = 0.3      # 上浮检查间隔 (秒)
-    water_turn_tolerance: float = 5.0      # 水中转向容差 (度)
-    water_jump_threshold: float = 63.0     # 海平面 Y 高度 (落水判定)
-    eye_height: float = 1.62               # 玩家眼睛高度 (格)
-    forbidden_zones: list = field(default_factory=list)  # 禁区列表 [{"x_min":..,"x_max":..,"z_min":..,"z_max":..}]
-
-
-@dataclass
-class HotkeyConfig:
-    """全局快捷键配置"""
-    toggle: str = "f6"
-    stop: str = "f7"
-    select_region: str = "f8"
-    test: str = "f9"
-    capture_template: str = "f10"
-    pick_color: str = "f11"
-
-
-@dataclass
-class RoiConfig:
-    """检测区域 (相对于 Minecraft 窗口的比例 0~1)"""
-    x: float = 0.25
-    y: float = 0.63
-    width: float = 0.32
-    height: float = 0.16
+    arrive_dist: float = 1.5
+    min_stand_distance: float = 2.0
+    max_stand_distance: float = 6.0
+    soft_stuck_window: float = 3.0
+    hard_stuck_window: float = 8.0
+    min_displacement: float = 0.3
+    exclude_spot_distance: float = 5.0
 
 
 @dataclass
 class AppConfig:
-    """整体配置聚合"""
-    window: WindowConfig = field(default_factory=WindowConfig)
+    map_data_path: str = "map_data.json"
+    runtime_path: str = "runtime_state.json"
+    route_memory_path: str = "runtime_route_memory.json"
+    window_title_keyword: str = "我的世界"
+    input_mode: str = "global"        # "global" | "window"
     fishing: FishingConfig = field(default_factory=FishingConfig)
-    detection: DetectionConfig = field(default_factory=DetectionConfig)
-    hotkeys: HotkeyConfig = field(default_factory=HotkeyConfig)
-    roi: RoiConfig = field(default_factory=RoiConfig)
-    adaptive_rgb: AdaptiveRGBConfig = field(default_factory=AdaptiveRGBConfig)
-    ocr: OcrConfig = field(default_factory=OcrConfig)
-    vision: VisionConfig = field(default_factory=VisionConfig)
-    map: MapConfig = field(default_factory=MapConfig)
     navigation: NavigationConfig = field(default_factory=NavigationConfig)
 
 
-_DEFAULT_CONFIG = AppConfig()
-
-
-def _default_config_dict() -> Dict[str, Any]:
-    """返回默认配置字典"""
-    return asdict(_DEFAULT_CONFIG)
-
-
-def load_config(config_path: str) -> AppConfig:
-    """
-    从 JSON 文件加载配置。
-
-    若文件不存在或解析失败，则使用默认配置并保存一份默认配置。
-    部分字段缺失时，使用默认值填充，保证健壮性。
-    """
-    default_dict = _default_config_dict()
-
-    if not os.path.exists(config_path):
-        print(f"[config] 配置文件不存在，创建默认配置: {config_path}")
-        save_config(config_path, _DEFAULT_CONFIG)
-        return _DEFAULT_CONFIG
-
+def load_config(path: str = "config.json") -> AppConfig:
+    cfg = AppConfig()
     try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            user_dict: Dict[str, Any] = json.load(f)
-    except (json.JSONDecodeError, OSError) as e:
-        print(f"[config] 配置文件损坏，使用默认配置: {e}")
-        backup_path = config_path + ".broken"
-        try:
-            os.rename(config_path, backup_path)
-            print(f"[config] 损坏的配置已备份为: {backup_path}")
-        except OSError:
-            pass
-        save_config(config_path, _DEFAULT_CONFIG)
-        return _DEFAULT_CONFIG
-
-    # 深度合并：用户配置覆盖默认配置，缺失字段使用默认值
-    merged_dict = _deep_merge(default_dict, user_dict)
-
-    # 规范化 target_color：支持对象 {r,g,b} 和数组 [r,g,b] 两种格式
-    det_dict = merged_dict.get("detection", {})
-    det_dict["target_color"] = _normalize_color(det_dict.get("target_color"))
-    det_dict["target_color_b"] = _normalize_color(det_dict.get("target_color_b"))
-    # 规范化 point_a/b_ratio：支持 [x,y] 数组格式
-    det_dict["point_a_ratio"] = _normalize_ratio_pair(det_dict.get("point_a_ratio"))
-    det_dict["point_b_ratio"] = _normalize_ratio_pair(det_dict.get("point_b_ratio"))
-
-    try:
-        config = AppConfig(
-            window=WindowConfig(**_filter_fields(WindowConfig, merged_dict.get("window", {}))),
-            fishing=FishingConfig(**_filter_fields(FishingConfig, merged_dict.get("fishing", {}))),
-            detection=DetectionConfig(**_filter_fields(DetectionConfig, det_dict)),
-            hotkeys=HotkeyConfig(**_filter_fields(HotkeyConfig, merged_dict.get("hotkeys", {}))),
-            roi=RoiConfig(**_filter_fields(RoiConfig, merged_dict.get("roi", {}))),
-            adaptive_rgb=AdaptiveRGBConfig(**_filter_fields(AdaptiveRGBConfig, merged_dict.get("adaptive_rgb", {}))),
-            ocr=OcrConfig(**_filter_fields(OcrConfig, merged_dict.get("ocr", {}))),
-            vision=VisionConfig(**_filter_fields(VisionConfig, merged_dict.get("vision", {}))),
-            map=MapConfig(**_filter_fields(MapConfig, merged_dict.get("map", {}))),
-            navigation=NavigationConfig(**_filter_fields(NavigationConfig, merged_dict.get("navigation", {}))),
-        )
-    except TypeError as e:
-        print(f"[config] 配置字段错误，使用默认配置: {e}")
-        return _DEFAULT_CONFIG
-
-    _validate_config(config)
-    return config
-
-
-def _filter_fields(cls, data: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    过滤字典只保留 cls 数据类的已知字段，忽略未知键。
-    使旧版本残留的废弃字段 (如 use_dual_detection / select_region_b / roi_b)
-    不会导致 TypeError 回退默认值，保留用户的自定义配置。
-    """
-    known = {f.name for f in fields(cls)}
-    return {k: v for k, v in data.items() if k in known}
-
-
-def _normalize_color(value: Any) -> Tuple[int, int, int]:
-    """
-    将配置中的颜色值规范化为 (r, g, b) 元组。
-    支持两种输入格式：
-      - 对象: {"r": 252, "g": 252, "b": 252}
-      - 数组: [252, 252, 252]
-    格式错误时返回默认白色。
-    """
-    if isinstance(value, dict):
-        r = value.get("r")
-        g = value.get("g")
-        b = value.get("b")
-        if all(isinstance(v, int) and 0 <= v <= 255 for v in (r, g, b)):
-            return (int(r), int(g), int(b))
-    elif isinstance(value, (list, tuple)) and len(value) == 3:
-        if all(isinstance(v, int) and 0 <= v <= 255 for v in value):
-            return (int(value[0]), int(value[1]), int(value[2]))
-    return (255, 255, 255)
-
-
-def _normalize_ratio_pair(value: Any) -> Tuple[float, float]:
-    """
-    规范化为 (x, y) 比例元组，用于检测点坐标。
-    支持 [x, y] 数组或 {"x":..,"y":..} 对象。
-    """
-    if isinstance(value, dict):
-        x = value.get("x")
-        y = value.get("y")
-        if isinstance(x, (int, float)) and isinstance(y, (int, float)):
-            return (float(x), float(y))
-    elif isinstance(value, (list, tuple)) and len(value) == 2:
-        if all(isinstance(v, (int, float)) for v in value):
-            return (float(value[0]), float(value[1]))
-    return (0.0, 0.0)
-
-
-def save_config(config_path: str, config: AppConfig) -> None:
-    """保存配置到 JSON 文件，颜色以 RGB 对象格式保存"""
-    data = asdict(config)
-    # 将 target_color 从元组转为 RGB 对象格式 {r, g, b}
-    tc = data.get("detection", {}).get("target_color")
-    if isinstance(tc, (list, tuple)) and len(tc) == 3:
-        data["detection"]["target_color"] = {
-            "r": int(tc[0]), "g": int(tc[1]), "b": int(tc[2]),
-        }
-    tcb = data.get("detection", {}).get("target_color_b")
-    if isinstance(tcb, (list, tuple)) and len(tcb) == 3:
-        data["detection"]["target_color_b"] = {
-            "r": int(tcb[0]), "g": int(tcb[1]), "b": int(tcb[2]),
-        }
-    # point_a/b_ratio 保持数组 [x,y] 格式
-    for k in ("point_a_ratio", "point_b_ratio"):
-        v = data.get("detection", {}).get(k)
-        if isinstance(v, (list, tuple)) and len(v) == 2:
-            data["detection"][k] = [float(v[0]), float(v[1])]
-    with open(config_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4, ensure_ascii=False)
-
-
-def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
-    """深度合并两个字典，override 中的值覆盖 base"""
-    result = dict(base)
-    for key, value in override.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-            result[key] = _deep_merge(result[key], value)
-        else:
-            result[key] = value
-    return result
-
-
-def _validate_config(config: AppConfig) -> None:
-    """校验配置合理性，不合规则修正并提示"""
-    det = config.detection
-    fish = config.fishing
-    ada = config.adaptive_rgb
-
-    # 检测模式校验
-    if det.mode not in ("rgb", "ocr", "hybrid"):
-        print(f"[config] detection.mode={det.mode!r} 非法，已重置为 'rgb'")
-        det.mode = "rgb"
-    if det.ocr_confirm_window_ms < 100:
-        det.ocr_confirm_window_ms = 100
-        print("[config] ocr_confirm_window_ms 过小，已修正为 100ms")
-
-    if fish.pull_interval_ms < 10:
-        fish.pull_interval_ms = 10
-        print("[config] pull_interval_ms 过小，已修正为 10ms")
-    if fish.pull_duration_ms < fish.pull_interval_ms:
-        fish.pull_duration_ms = fish.pull_interval_ms
-        print("[config] pull_duration_ms 小于间隔，已修正")
-    if fish.recast_delay_min_ms < 0:
-        fish.recast_delay_min_ms = 0
-    if fish.recast_delay_max_ms < fish.recast_delay_min_ms:
-        fish.recast_delay_max_ms = fish.recast_delay_min_ms
-        print("[config] recast_delay_max 小于 min，已修正")
-
-    if det.white_threshold < 0 or det.white_threshold > 255:
-        det.white_threshold = max(0, min(255, det.white_threshold))
-    if det.white_pixel_threshold < 1:
-        det.white_pixel_threshold = 1
-    if det.min_component_size < 1:
-        det.min_component_size = 1
-    if det.max_white_ratio <= 0 or det.max_white_ratio > 1:
-        det.max_white_ratio = 0.6
-        print("[config] max_white_ratio 超出范围，已修正为 0.6")
-    if det.template_match_threshold < 0.5 or det.template_match_threshold > 1.0:
-        det.template_match_threshold = max(0.5, min(1.0, det.template_match_threshold))
-        print("[config] template_match_threshold 超出范围，已修正")
-    if det.color_tolerance < 0 or det.color_tolerance > 255:
-        det.color_tolerance = max(0, min(255, det.color_tolerance))
-    # 校验 target_color
-    tc = det.target_color
-    if not isinstance(tc, (list, tuple)) or len(tc) != 3 or any(not isinstance(v, int) or v < 0 or v > 255 for v in tc):
-        det.target_color = (255, 255, 255)
-        print("[config] target_color 格式错误，已重置为白色")
-    tcb = det.target_color_b
-    if not isinstance(tcb, (list, tuple)) or len(tcb) != 3 or any(not isinstance(v, int) or v < 0 or v > 255 for v in tcb):
-        det.target_color_b = (255, 255, 255)
-        print("[config] target_color_b 格式错误，已重置为白色")
-    if det.bite_confirm_frames < 1:
-        det.bite_confirm_frames = 1
-    if det.bite_cooldown_ms < 0:
-        det.bite_cooldown_ms = 0
-    if det.screenshot_interval_ms < 1:
-        det.screenshot_interval_ms = 1
-    # 校验 point_a/b_ratio 范围 0~1
-    for attr in ("point_a_ratio", "point_b_ratio"):
-        v = getattr(det, attr)
-        if len(v) != 2:
-            setattr(det, attr, (0.0, 0.0))
-        else:
-            v = (max(0.0, min(1.0, float(v[0]))), max(0.0, min(1.0, float(v[1]))))
-            setattr(det, attr, v)
-
-    # 自适应模型参数校验
-    if ada.max_samples < ada.min_samples:
-        ada.max_samples = ada.min_samples
-        print("[config] adaptive_rgb.max_samples 小于 min_samples，已修正")
-    if ada.min_samples < 1:
-        ada.min_samples = 1
-    if ada.min_tolerance < 0:
-        ada.min_tolerance = 0
-    if ada.max_tolerance < ada.min_tolerance:
-        ada.max_tolerance = ada.min_tolerance
-        print("[config] adaptive_rgb.max_tolerance 小于 min_tolerance，已修正")
-    if ada.outlier_threshold < 1.0:
-        ada.outlier_threshold = 1.0
-
-    # ROI 范围限制在 0~1
-    roi = config.roi
-    for attr in ("x", "y", "width", "height"):
-        val = getattr(roi, attr)
-        if val < 0:
-            setattr(roi, attr, 0.0)
-        elif val > 1:
-            setattr(roi, attr, 1.0)
-
-    # OCR 配置校验
-    ocr = config.ocr
-    for attr in ("roi_x", "roi_y", "roi_width", "roi_height"):
-        v = getattr(ocr, attr)
-        if v < 0.0:
-            setattr(ocr, attr, 0.0)
-        elif v > 1.0:
-            setattr(ocr, attr, 1.0)
-    if ocr.interval_ms < 50:
-        ocr.interval_ms = 50
-        print("[config] ocr.interval_ms 过小，已修正为 50ms")
-    if ocr.min_confidence < 0.0 or ocr.min_confidence > 1.0:
-        ocr.min_confidence = max(0.0, min(1.0, ocr.min_confidence))
-        print("[config] ocr.min_confidence 超出范围，已修正")
-    # 枯竭 ROI 范围限制
-    for attr in ("depleted_roi_x", "depleted_roi_y", "depleted_roi_width", "depleted_roi_height"):
-        v = getattr(ocr, attr)
-        if v < 0.0:
-            setattr(ocr, attr, 0.0)
-        elif v > 1.0:
-            setattr(ocr, attr, 1.0)
-    if ocr.depleted_confirm_ms < 200:
-        ocr.depleted_confirm_ms = 200
-        print("[config] ocr.depleted_confirm_ms 过小，已修正为 200ms")
-    # 左下角坐标 ROI 范围限制
-    for attr in ("coord_roi_x", "coord_roi_y", "coord_roi_width", "coord_roi_height"):
-        v = getattr(ocr, attr)
-        if v < 0.0:
-            setattr(ocr, attr, 0.0)
-        elif v > 1.0:
-            setattr(ocr, attr, 1.0)
-
-    # 视觉识别层参数校验
-    vis = config.vision
-    vis.water_h_low = max(0, min(179, vis.water_h_low))
-    vis.water_h_high = max(0, min(179, vis.water_h_high))
-    vis.water_s_low = max(0, min(255, vis.water_s_low))
-    vis.water_s_high = max(0, min(255, vis.water_s_high))
-    vis.water_v_low = max(0, min(255, vis.water_v_low))
-    vis.water_v_high = max(0, min(255, vis.water_v_high))
-    if vis.min_water_area < 50:
-        vis.min_water_area = 50
-    if vis.min_texture_std < 0:
-        vis.min_texture_std = 0
-    if vis.min_obstacle_area < 50:
-        vis.min_obstacle_area = 50
-
-    # 地图模型参数校验
-    mp = config.map
-    if mp.spot_dedup_distance < 0.5:
-        mp.spot_dedup_distance = 0.5
-    if not mp.persistence_path:
-        mp.persistence_path = "world_map.json"
-
-    # 导航参数校验 (阶段六~九)
-    nav = config.navigation
-    if nav.move_step_s < 0.05:
-        nav.move_step_s = 0.05
-    if nav.turn_step_px < 1:
-        nav.turn_step_px = 1
-    if nav.turn_max_px < nav.turn_step_px:
-        nav.turn_max_px = nav.turn_step_px
-    if nav.search_max_turns < 1:
-        nav.search_max_turns = 1
-    if nav.search_max_steps < 1:
-        nav.search_max_steps = 1
-    if nav.arrival_water_area_ratio < 0.01 or nav.arrival_water_area_ratio > 1.0:
-        nav.arrival_water_area_ratio = 0.15
-    if nav.arrival_min_confidence < 0.0 or nav.arrival_min_confidence > 1.0:
-        nav.arrival_min_confidence = max(0.0, min(1.0, nav.arrival_min_confidence))
-    if nav.pathfind_grid_size < 0.25:
-        nav.pathfind_grid_size = 0.25
-    if nav.pathfind_max_steps < 10:
-        nav.pathfind_max_steps = 10
-    if nav.pathfind_step_duration_s < 0.05:
-        nav.pathfind_step_duration_s = 0.05
-    if nav.stuck_ratio_threshold < 0.001:
-        nav.stuck_ratio_threshold = 0.001
-    if nav.stuck_trigger_count < 1:
-        nav.stuck_trigger_count = 1
-    if nav.evasion_back_time < 0.1:
-        nav.evasion_back_time = 0.1
-    if nav.evasion_turn_px < 1:
-        nav.evasion_turn_px = 1
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if "fishing" in data:
+            for k, v in data["fishing"].items():
+                if hasattr(cfg.fishing, k):
+                    setattr(cfg.fishing, k, v)
+        if "navigation" in data:
+            for k, v in data["navigation"].items():
+                if hasattr(cfg.navigation, k):
+                    setattr(cfg.navigation, k, v)
+        for k in ("map_data_path", "runtime_path", "route_memory_path",
+                  "window_title_keyword", "input_mode"):
+            if k in data:
+                setattr(cfg, k, data[k])
+    except FileNotFoundError:
+        pass
+    return cfg
