@@ -12,7 +12,6 @@ hotkeys.py
 - F9: 测试当前检测区域
 - F10: 截取「咬钩！」模板
 - F11: 取色器 (放大镜选取目标像素颜色)
-- F12: 选择第二个检测点 B 区域
 
 注意：keyboard 库的回调在监听线程中执行，
 因此回调中应尽量只做状态切换，耗时/UI 操作交给主线程。
@@ -44,7 +43,6 @@ class HotkeyManager:
         self.on_test: Optional[Callable[[], None]] = None
         self.on_capture_template: Optional[Callable[[], None]] = None
         self.on_pick_color: Optional[Callable[[], None]] = None
-        self.on_select_region_b: Optional[Callable[[], None]] = None
 
     def register(self) -> bool:
         """注册所有全局快捷键。失败返回 False。"""
@@ -58,11 +56,10 @@ class HotkeyManager:
             keyboard.add_hotkey(self._cfg.test, self._safe(self._on_test))
             keyboard.add_hotkey(self._cfg.capture_template, self._safe(self._on_capture_template))
             keyboard.add_hotkey(self._cfg.pick_color, self._safe(self._on_pick_color))
-            keyboard.add_hotkey(self._cfg.select_region_b, self._safe(self._on_select_region_b))
             self._registered = True
             self._log.info(
                 f"快捷键已注册: "
-                f"F6(开始/暂停) F7(停止) F8(选区域) F9(测试) F10(截模板) F11(取色) F12(检测点B)"
+                f"F6(开始/暂停) F7(停止) F8(选区域) F9(测试) F10(截模板) F11(取色)"
             )
             return True
         except Exception as e:
@@ -116,7 +113,3 @@ class HotkeyManager:
     def _on_pick_color(self) -> None:
         if self.on_pick_color:
             self.on_pick_color()
-
-    def _on_select_region_b(self) -> None:
-        if self.on_select_region_b:
-            self.on_select_region_b()

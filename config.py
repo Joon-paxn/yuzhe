@@ -48,7 +48,6 @@ class DetectionConfig:
     bite_confirm_frames: int = 3         # 连续确认帧数
     bite_cooldown_ms: int = 1500         # 咬钩冷却时间，防止重复触发
     screenshot_interval_ms: int = 50     # 截图检测间隔
-    use_dual_detection: bool = False     # 阶段一：双检测点联合确认 (A 且 B 同时通过才触发)
 
 
 @dataclass
@@ -60,7 +59,6 @@ class HotkeyConfig:
     test: str = "f9"
     capture_template: str = "f10"
     pick_color: str = "f11"
-    select_region_b: str = "f12"          # 阶段一：选择第二个检测点 B 区域
 
 
 @dataclass
@@ -80,7 +78,6 @@ class AppConfig:
     detection: DetectionConfig = field(default_factory=DetectionConfig)
     hotkeys: HotkeyConfig = field(default_factory=HotkeyConfig)
     roi: RoiConfig = field(default_factory=RoiConfig)
-    roi_b: RoiConfig = field(default_factory=RoiConfig)  # 阶段一：检测点 B 区域
 
 
 _DEFAULT_CONFIG = AppConfig()
@@ -134,7 +131,6 @@ def load_config(config_path: str) -> AppConfig:
             detection=DetectionConfig(**det_dict),
             hotkeys=HotkeyConfig(**merged_dict.get("hotkeys", {})),
             roi=RoiConfig(**merged_dict.get("roi", {})),
-            roi_b=RoiConfig(**merged_dict.get("roi_b", {})),
         )
     except TypeError as e:
         print(f"[config] 配置字段错误，使用默认配置: {e}")
@@ -249,12 +245,3 @@ def _validate_config(config: AppConfig) -> None:
             setattr(roi, attr, 0.0)
         elif val > 1:
             setattr(roi, attr, 1.0)
-
-    # roi_b 范围限制在 0~1
-    roi_b = config.roi_b
-    for attr in ("x", "y", "width", "height"):
-        val = getattr(roi_b, attr)
-        if val < 0:
-            setattr(roi_b, attr, 0.0)
-        elif val > 1:
-            setattr(roi_b, attr, 1.0)
