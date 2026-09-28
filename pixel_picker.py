@@ -154,7 +154,7 @@ def pick_pixel_colors(hints: list) -> list:
             cx - CROSS_SIZE, cy, cx + CROSS_SIZE, cy, fill="red", width=1,
         )
         state["cross_v"] = canvas.create_line(
-            cx, cy - CROSS_SIZE, cy + CROSS_SIZE, fill="red", width=1,
+            cx, cy - CROSS_SIZE, cx, cy + CROSS_SIZE, fill="red", width=1,
         )
 
         r, g, b = pixel_rgb(x, y)
