@@ -137,6 +137,29 @@ class MapConfig:
 
 
 @dataclass
+class NavigationConfig:
+    """导航与移动配置 (阶段六~九)
+
+    控制自动寻找新钓点时的移动/探索/寻路参数。
+    enabled=False 时 DEPLETED 状态不触发自动寻路，保持原有「停止钓鱼」行为。
+    """
+    enabled: bool = False                 # 是否启用自动寻找新钓点 (阶段六~九)
+    # 移动参数
+    move_step_s: float = 0.5              # 单步移动按住时间 (秒)
+    turn_step_px: int = 80                # 单次视角旋转步长 (像素)
+    turn_max_px: int = 400                # 单次旋转最大像素 (防过大)
+    # 探索参数
+    search_max_turns: int = 8             # 寻找水域时最多旋转次数 (每步 turn_step_px)
+    search_max_steps: int = 20            # 探索时最多前进步数
+    arrival_water_area_ratio: float = 0.15  # 水域占画面比例达此值视为到达水域
+    arrival_min_confidence: float = 0.4   # 候选钓点最低置信度
+    # 寻路参数
+    pathfind_grid_size: float = 1.0       # A* 网格分辨率 (方块)
+    pathfind_max_steps: int = 500         # A* 最大搜索步数 (防超时)
+    pathfind_step_duration_s: float = 0.5  # 每步移动按住时间
+
+
+@dataclass
 class HotkeyConfig:
     """全局快捷键配置"""
     toggle: str = "f6"
@@ -168,6 +191,7 @@ class AppConfig:
     ocr: OcrConfig = field(default_factory=OcrConfig)
     vision: VisionConfig = field(default_factory=VisionConfig)
     map: MapConfig = field(default_factory=MapConfig)
+    navigation: NavigationConfig = field(default_factory=NavigationConfig)
 
 
 _DEFAULT_CONFIG = AppConfig()
@@ -228,6 +252,7 @@ def load_config(config_path: str) -> AppConfig:
             ocr=OcrConfig(**_filter_fields(OcrConfig, merged_dict.get("ocr", {}))),
             vision=VisionConfig(**_filter_fields(VisionConfig, merged_dict.get("vision", {}))),
             map=MapConfig(**_filter_fields(MapConfig, merged_dict.get("map", {}))),
+            navigation=NavigationConfig(**_filter_fields(NavigationConfig, merged_dict.get("navigation", {}))),
         )
     except TypeError as e:
         print(f"[config] 配置字段错误，使用默认配置: {e}")
@@ -450,3 +475,26 @@ def _validate_config(config: AppConfig) -> None:
         mp.spot_dedup_distance = 0.5
     if not mp.persistence_path:
         mp.persistence_path = "world_map.json"
+
+    # 导航参数校验 (阶段六~九)
+    nav = config.navigation
+    if nav.move_step_s < 0.05:
+        nav.move_step_s = 0.05
+    if nav.turn_step_px < 1:
+        nav.turn_step_px = 1
+    if nav.turn_max_px < nav.turn_step_px:
+        nav.turn_max_px = nav.turn_step_px
+    if nav.search_max_turns < 1:
+        nav.search_max_turns = 1
+    if nav.search_max_steps < 1:
+        nav.search_max_steps = 1
+    if nav.arrival_water_area_ratio < 0.01 or nav.arrival_water_area_ratio > 1.0:
+        nav.arrival_water_area_ratio = 0.15
+    if nav.arrival_min_confidence < 0.0 or nav.arrival_min_confidence > 1.0:
+        nav.arrival_min_confidence = max(0.0, min(1.0, nav.arrival_min_confidence))
+    if nav.pathfind_grid_size < 0.25:
+        nav.pathfind_grid_size = 0.25
+    if nav.pathfind_max_steps < 10:
+        nav.pathfind_max_steps = 10
+    if nav.pathfind_step_duration_s < 0.05:
+        nav.pathfind_step_duration_s = 0.05

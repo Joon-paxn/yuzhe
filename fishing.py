@@ -5,13 +5,18 @@ fishing.py
 
 状态流转：
     WAITING_BITE -> (检测到咬钩) -> PULLING(右键收竿) -> RECAST_DELAY -> RECAST(右键抛竿) -> WAITING_BITE
-    WAITING_BITE -> (检测到钓点枯竭) -> DEPLETED (停止钓鱼，等待后续阶段自动寻找新钓点)
+    WAITING_BITE -> (检测到钓点枯竭) -> DEPLETED -> SEARCHING(探索水域) -> PLANNING -> MOVING -> ARRIVED -> WAITING_BITE
+
+阶段六~九：DEPLETED 后自动寻找新钓点 (需 navigation.enabled=true 且视觉层启用)，
+到达新钓点后回到 WAITING_BITE 继续钓鱼，形成完整自动循环。
+navigation.enabled=false 时 DEPLETED 保持原有「停止钓鱼」行为。
 
 操作说明：
 - 拉鱼阶段: 检测到咬钩后右键点击一次（收竿）。
 - 重抛等待: 随机 recast_delay_min_ms ~ recast_delay_max_ms。
 - 重抛: 一次独立右键点击（抛竿）。
-- 钓点枯竭: OCR 识别到「鱼群：枯竭」并持续确认后进入 DEPLETED，停止抛竿与咬钩检测。
+- 钓点枯竭: OCR 识别到「鱼群：枯竭」并持续确认后进入 DEPLETED。
+- 自动寻路: DEPLETED → SEARCHING → PLANNING → MOVING → ARRIVED → WAITING_BITE。
 
 并发控制：
 - stop_event: F7 立即停止，最高优先级，所有循环都必须检查。
@@ -20,6 +25,7 @@ fishing.py
 
 安全：
 - 每次鼠标操作前检查 Minecraft 窗口有效性，无效则立即 STOP。
+- 移动阶段被 F7/失焦打断时立即释放所有按键 (MovementPlanner.stop)。
 """
 
 from __future__ import annotations
@@ -43,7 +49,12 @@ class State(Enum):
     PULLING = auto()
     RECAST_DELAY = auto()
     RECAST = auto()
-    DEPLETED = auto()      # 阶段三：钓点枯竭，停止钓鱼
+    DEPLETED = auto()      # 阶段三：钓点枯竭
+    # 阶段六~九：自动寻找新钓点
+    SEARCHING = auto()     # 探索附近水域
+    PLANNING = auto()      # 规划路径
+    MOVING = auto()        # 移动中
+    ARRIVED = auto()       # 到达新钓点
 
 
 class FishingEngine:
@@ -56,12 +67,14 @@ class FishingEngine:
         detector: BiteDetector,
         input_ctrl: InputController,
         ocr_service: Optional[OcrService] = None,
+        navigator: Optional["object"] = None,
     ) -> None:
         self._cfg = config
         self._mc = mc_window
         self._detector = detector
         self._input = input_ctrl
         self._ocr = ocr_service
+        self._navigator = navigator
         self._log = get_logger()
 
         self._state: State = State.WAITING_BITE
@@ -73,6 +86,9 @@ class FishingEngine:
         # 阶段三：钓点枯竭检测 (时间窗确认，避免 OCR 闪烁误判)
         self._depleted_since: float = 0.0       # 首次检测到枯竭的时间戳
         self._depleted_warned: bool = False     # 枯竭检测不可用警告 (只提示一次)
+
+        # 阶段八：导航子状态 (供 GUI 显示 Navigator 当前阶段)
+        self._nav_substate: str = ""
 
         self._thread: Optional[threading.Thread] = None
 
@@ -103,6 +119,8 @@ class FishingEngine:
         self._log.info("正在停止自动钓鱼...")
         self._stop_event.set()
         self._pause_event.clear()
+        # 阶段六~九：停止时立即释放所有移动按键 (安全)
+        self._input.release_all_keys()
         self._running = False
 
     def toggle_pause(self) -> bool:
@@ -130,13 +148,24 @@ class FishingEngine:
 
     def get_state_name(self) -> str:
         """当前状态名 (中文，供 GUI 显示)"""
-        return {
+        names = {
             State.WAITING_BITE: "等待咬钩",
             State.PULLING: "收竿中",
             State.RECAST_DELAY: "抛竿等待",
             State.RECAST: "抛竿",
             State.DEPLETED: "钓点枯竭",
-        }.get(self._state, str(self._state))
+            State.SEARCHING: "探索水域",
+            State.PLANNING: "规划路径",
+            State.MOVING: "移动中",
+            State.ARRIVED: "到达钓点",
+        }
+        name = names.get(self._state, str(self._state))
+        # 阶段八：导航子状态附加显示
+        if self._nav_substate and self._state in (
+            State.SEARCHING, State.PLANNING, State.MOVING, State.ARRIVED,
+        ):
+            name = f"{name} ({self._nav_substate})"
+        return name
 
     def wait(self) -> None:
         if self._thread is not None:
@@ -162,11 +191,21 @@ class FishingEngine:
                     self._state_recast()
                 elif self._state == State.DEPLETED:
                     self._state_depleted()
+                elif self._state == State.SEARCHING:
+                    self._state_searching()
+                elif self._state == State.PLANNING:
+                    self._state_planning()
+                elif self._state == State.MOVING:
+                    self._state_moving()
+                elif self._state == State.ARRIVED:
+                    self._state_arrived()
                 if not self._stop_event.is_set():
                     time.sleep(0.01)
         except Exception as e:
             self._log.error(f"钓鱼线程异常: {e}")
         finally:
+            # 确保退出时释放所有按键
+            self._input.release_all_keys()
             self._running = False
             self._log.info("自动钓鱼已停止")
 
@@ -224,9 +263,75 @@ class FishingEngine:
         return False
 
     def _state_depleted(self) -> None:
-        """DEPLETED: 钓点枯竭，停止钓鱼，等待 (后续阶段自动寻找新钓点)"""
-        # 进入此状态时已记录日志；此处阻塞线程等待用户停止或后续阶段接管
-        self._interruptible_sleep(0.5)
+        """
+        DEPLETED: 钓点枯竭。
+        - navigation.enabled=true 且 Navigator 就绪 → 转 SEARCHING 自动寻找新钓点
+        - 否则保持原有「停止钓鱼」阻塞等待行为
+        """
+        # 标记当前钓点枯竭 (WorldMap 记录)
+        if self._navigator is not None and self._navigator._map is not None:
+            current = self._navigator._map.get_current()
+            if current is not None and not current.depleted:
+                self._navigator._map.mark_depleted(current.id)
+                self._log.info(f"钓点 {current.id} 已标记为枯竭")
+
+        if self._cfg.navigation.enabled and self._navigator is not None:
+            self._log.info("navigation 已启用，进入 SEARCHING 自动寻找新钓点")
+            self._state = State.SEARCHING
+        else:
+            # 未启用自动寻路：保持原有阻塞等待
+            self._interruptible_sleep(0.5)
+
+    # ---------------- 阶段六~九：自动寻找新钓点 ----------------
+
+    def _state_searching(self) -> None:
+        """
+        SEARCHING: 触发 Navigator 寻找新钓点完整流程。
+        Navigator 内部完成 SEARCHING→PLANNING→MOVING→ARRIVED，
+        本状态调用其 find_new_spot 并根据结果转移。
+        """
+        if not self._check_safety():
+            self._input.release_all_keys()
+            return
+        if self._navigator is None:
+            self._log.warn("Navigator 未初始化，回退到 WAITING_BITE")
+            self._state = State.WAITING_BITE
+            return
+        self._nav_substate = "搜索中"
+        self._log.info("Navigator: 开始寻找新钓点")
+        outcome = self._navigator.find_new_spot()
+        if self._stop_event.is_set():
+            self._input.release_all_keys()
+            return
+        if outcome.success:
+            self._nav_substate = ""
+            self._state = State.ARRIVED
+        else:
+            self._log.warn(f"寻找新钓点失败: {outcome.reason}")
+            self._nav_substate = ""
+            # 失败后回到 WAITING_BITE (用户可手动处理)，避免无限循环
+            self._state = State.WAITING_BITE
+
+    def _state_planning(self) -> None:
+        """PLANNING: 由 Navigator 内部处理，本状态作为占位 (实际不进入)"""
+        # Navigator.find_new_spot 已完成 planning，直接转 MOVING
+        self._state = State.MOVING
+
+    def _state_moving(self) -> None:
+        """MOVING: 由 Navigator 内部处理，本状态作为占位 (实际不进入)"""
+        # Navigator.find_new_spot 已完成 moving，转 ARRIVED
+        self._state = State.ARRIVED
+
+    def _state_arrived(self) -> None:
+        """ARRIVED: 到达新钓点，重置检测器，回到 WAITING_BITE 继续钓鱼"""
+        self._log.success("到达新钓点，重新开始钓鱼")
+        self._nav_substate = ""
+        self._detector.reset()
+        # 抛竿开始新一轮钓鱼
+        if self._check_safety():
+            self._input.right_click()
+            self._log.info("右键抛竿 (新钓点)")
+        self._state = State.WAITING_BITE
 
     def _state_waiting_bite(self) -> None:
         """WAITING_BITE: 循环截图检测咬钩"""

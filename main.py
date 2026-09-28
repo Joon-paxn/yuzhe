@@ -31,6 +31,10 @@ from pixel_picker import pick_pixel_color, pick_pixel_colors, pick_pixel_colors_
 from gui import FishingGUI
 from logger import get_logger
 from ocr import OcrService
+from navigation.map import WorldMap
+from navigation.movement import MovementPlanner
+from navigation.navigator import Navigator
+from vision import VisionDetector
 
 
 CONFIG_PATH = "config.json"
@@ -50,6 +54,10 @@ class AutoFishingApp:
         self._hotkeys: Optional[HotkeyManager] = None
         self._gui: Optional[FishingGUI] = None
         self._ocr: Optional[OcrService] = None
+        self._vision: Optional[VisionDetector] = None
+        self._world_map: Optional[WorldMap] = None
+        self._movement: Optional[MovementPlanner] = None
+        self._navigator: Optional[Navigator] = None
 
         self._task_queue: "queue.Queue[str]" = queue.Queue()
         self._exit_event = threading.Event()
@@ -89,6 +97,41 @@ class AutoFishingApp:
                 )
         else:
             self._log.info("OCR 层未启用 (ocr.enabled=false 且 mode=rgb)，现有钓鱼检测不受影响")
+
+        # 阶段六~九：视觉层 + 世界地图 + 移动规划 + 导航器
+        if self._config.vision.enabled:
+            self._vision = VisionDetector(self._config.vision)
+            self._log.info("视觉识别层已启用 (阶段四)")
+        else:
+            self._log.info("视觉识别层未启用 (vision.enabled=false)，自动寻路将不可用")
+
+        # 加载持久化世界地图
+        self._world_map = WorldMap.load(self._config.map.persistence_path)
+        self._world_map.spot_dedup_distance = self._config.map.spot_dedup_distance
+        self._world_map.auto_save = self._config.map.auto_save
+        self._world_map.persistence_path = self._config.map.persistence_path
+        self._log.info(f"世界地图: {self._world_map.summary()}")
+
+        # MovementPlanner + Navigator (共享 FishingEngine 的 stop/pause 事件)
+        self._movement = MovementPlanner(
+            self._input, self._engine._stop_event, self._engine._pause_event,
+        )
+        self._navigator = Navigator(
+            self._config, self._mc, self._input, self._movement,
+            vision=self._vision, world_map=self._world_map, ocr_service=self._ocr,
+        )
+        # 注入 Navigator 到 FishingEngine (DEPLETED 后自动寻路)
+        self._engine._navigator = self._navigator
+        if self._config.navigation.enabled:
+            if self._vision is None:
+                self._log.warn(
+                    "navigation.enabled=true 但 vision.enabled=false，"
+                    "自动寻路需要视觉层识别水域，已回退到 DEPLETED 停止行为"
+                )
+            else:
+                self._log.success("自动寻找新钓点已启用 (阶段六~九完整自动循环)")
+        else:
+            self._log.info("自动寻路未启用 (navigation.enabled=false)，DEPLETED 时停止钓鱼")
 
         self._hotkeys = HotkeyManager(self._config.hotkeys)
         self._hotkeys.on_toggle = self._on_toggle

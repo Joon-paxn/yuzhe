@@ -92,5 +92,18 @@
         "spot_dedup_distance": 3.0,
         "persistence_path": "world_map.json",
         "auto_save": true
+    },
+    "navigation": {
+        "enabled": false,
+        "move_step_s": 0.5,
+        "turn_step_px": 80,
+        "turn_max_px": 400,
+        "search_max_turns": 8,
+        "search_max_steps": 20,
+        "arrival_water_area_ratio": 0.15,
+        "arrival_min_confidence": 0.4,
+        "pathfind_grid_size": 1.0,
+        "pathfind_max_steps": 500,
+        "pathfind_step_duration_s": 0.5
     }
 }
