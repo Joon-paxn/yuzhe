@@ -20,6 +20,14 @@ class WindowConfig:
     """Minecraft 窗口相关配置"""
     title_keyword: str = "Minecraft"
     check_interval_ms: int = 2000
+    # 借鉴 Tau-main：是否使用 PrintWindow 后台抓图 (窗口被遮挡也能截到游戏画面)
+    grab_from_window: bool = False
+    # 借鉴 Tau-main：输入模式 "global"(pyautogui 全局，需前台) / "window"(PostMessageW 后台)
+    input_mode: str = "global"
+    # 借鉴 Tau-main：游戏日志监听 (检测枯竭等)，路径为空则不启用
+    log_watch_path: str = ""
+    log_watch_interval_ms: int = 300
+    log_watch_enabled: bool = False
 
 
 @dataclass
@@ -99,6 +107,12 @@ class OcrConfig:
     depleted_roi_height: float = 0.25     # 枯竭面板 ROI height
     depleted_confirm_ms: int = 1000       # 枯竭持续确认时间 (毫秒，避免闪烁误判)
     depleted_enabled: bool = True         # 是否启用枯竭检测 (OCR 运行时生效)
+    # ---- 左下角 F3 坐标识别 ----
+    coord_roi_x: float = 0.0              # 坐标 ROI x (左下角)
+    coord_roi_y: float = 0.93             # 坐标 ROI y (底部)
+    coord_roi_width: float = 0.22         # 坐标 ROI width
+    coord_roi_height: float = 0.05        # 坐标 ROI height
+    coord_enabled: bool = False           # 是否启用坐标识别 (需开启 F3)
 
 
 @dataclass
@@ -157,6 +171,49 @@ class NavigationConfig:
     pathfind_grid_size: float = 1.0       # A* 网格分辨率 (方块)
     pathfind_max_steps: int = 500         # A* 最大搜索步数 (防超时)
     pathfind_step_duration_s: float = 0.5  # 每步移动按住时间
+    # 卡死检测 (借鉴 Tau-main)：水域占比变化小于此阈值视为未移动
+    stuck_ratio_threshold: float = 0.02    # 水域占比变化下限 (低于此视为卡住)
+    stuck_trigger_count: int = 3           # 连续卡住次数达此值触发避障
+    evasion_back_time: float = 0.8         # 避障后退时长 (秒)
+    evasion_turn_px: int = 200             # 避障转向像素
+    # ---- 移植 Tau-main：角度旋转参数 ----
+    dpi: float = 1320.0                    # 鼠标 DPI (用于 deg_per_pixel 计算)
+    sensitivity: float = 95.0              # MC 灵敏度 (0~100)
+    deg_per_pixel_factor: float = 0.15     # 度/像素 换算系数
+    deg_per_pixel_override: float = 0.0    # 手动覆盖 deg_per_pixel (0=自动)
+    angle_tolerance: float = 1.0           # 角度旋转容差 (度)
+    max_rotation_attempts: int = 3         # 旋转最大重试次数
+    rotation_retry_delay: float = 0.05     # 旋转重试间隔 (秒)
+    mouse_move_multiplier: float = 1.0     # 鼠标移动倍率
+    mouse_move_step: int = 20              # 步进式鼠标每步像素
+    mouse_move_delay: float = 0.005        # 步进式鼠标每步延迟 (秒)
+    # ---- 移植 Tau-main：T/I 循环导航参数 ----
+    player_speed: float = 5.625            # 玩家移动速度 (格/秒)
+    arrival_dist: float = 1.5              # 到达判定距离 (格)
+    t_to_i_distance: float = 15.0          # T→I 循环切换距离 (格)
+    per_check: float = 1.0                 # T 循环每次检查间隔 (秒)
+    i_loop_max_iter: int = 10              # I 循环最大迭代次数
+    walk_time_factor: float = 0.9          # I 循环步行时间系数
+    i_loop_min_walk_time: float = 0.05     # I 循环最小单步时间 (秒)
+    i_loop_max_walk_time: float = 1.0      # I 循环最大单步时间 (秒)
+    i_loop_post_walk_delay: float = 0.2    # I 循环每步后延迟 (秒)
+    i_loop_adaptive_ratio: float = 0.6     # I 循环自适应步长比例
+    i_loop_adaptive_max_walk: float = 2.0  # I 循环自适应最大步长 (秒)
+    # ---- 移植 Tau-main：卡死/避障参数 ----
+    stuck_threshold: float = 0.15          # 位置变化小于此值视为卡住 (格)
+    evasion_short_max: float = 3.0         # 避障短侧移最大时长 (秒)
+    evasion_long_min: float = 3.0          # 避障长侧移最小时长 (秒)
+    evasion_long_max: float = 5.0          # 避障长侧移最大时长 (秒)
+    evasion_short_probability: float = 0.8 # 避障短侧移概率
+    evasion_cycle_interval: int = 3        # 每 N 次避障强制长侧移
+    # ---- 移植 Tau-main：水上浮/禁区参数 ----
+    water_float_timeout: float = 2.0       # 上浮超时 (秒)
+    float_pitch_angle: float = 45.0        # 上浮时俯仰上抬角度
+    float_check_interval: float = 0.3      # 上浮检查间隔 (秒)
+    water_turn_tolerance: float = 5.0      # 水中转向容差 (度)
+    water_jump_threshold: float = 63.0     # 海平面 Y 高度 (落水判定)
+    eye_height: float = 1.62               # 玩家眼睛高度 (格)
+    forbidden_zones: list = field(default_factory=list)  # 禁区列表 [{"x_min":..,"x_max":..,"z_min":..,"z_max":..}]
 
 
 @dataclass
@@ -453,6 +510,13 @@ def _validate_config(config: AppConfig) -> None:
     if ocr.depleted_confirm_ms < 200:
         ocr.depleted_confirm_ms = 200
         print("[config] ocr.depleted_confirm_ms 过小，已修正为 200ms")
+    # 左下角坐标 ROI 范围限制
+    for attr in ("coord_roi_x", "coord_roi_y", "coord_roi_width", "coord_roi_height"):
+        v = getattr(ocr, attr)
+        if v < 0.0:
+            setattr(ocr, attr, 0.0)
+        elif v > 1.0:
+            setattr(ocr, attr, 1.0)
 
     # 视觉识别层参数校验
     vis = config.vision
@@ -498,3 +562,11 @@ def _validate_config(config: AppConfig) -> None:
         nav.pathfind_max_steps = 10
     if nav.pathfind_step_duration_s < 0.05:
         nav.pathfind_step_duration_s = 0.05
+    if nav.stuck_ratio_threshold < 0.001:
+        nav.stuck_ratio_threshold = 0.001
+    if nav.stuck_trigger_count < 1:
+        nav.stuck_trigger_count = 1
+    if nav.evasion_back_time < 0.1:
+        nav.evasion_back_time = 0.1
+    if nav.evasion_turn_px < 1:
+        nav.evasion_turn_px = 1

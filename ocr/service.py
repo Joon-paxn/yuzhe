@@ -57,8 +57,16 @@ class OcrService:
                 x=ocr_cfg.depleted_roi_x, y=ocr_cfg.depleted_roi_y,
                 width=ocr_cfg.depleted_roi_width, height=ocr_cfg.depleted_roi_height,
             )
+        # 左下角 F3 坐标 ROI (X: ... Y: ... Z: ...)
+        if getattr(ocr_cfg, "coord_enabled", False):
+            self._rois["coord"] = OcrRoiConfig(
+                x=ocr_cfg.coord_roi_x, y=ocr_cfg.coord_roi_y,
+                width=ocr_cfg.coord_roi_width, height=ocr_cfg.coord_roi_height,
+            )
 
         self._sct = mss.mss()
+        # 借鉴 Tau-main：是否用 PrintWindow 后台抓图 (由 main.py 设置)
+        self._grab_from_window: bool = False
 
         self._lock = threading.Lock()
         self._latest_result: OcrResult = OcrResult(success=False, error="尚未运行")
@@ -183,9 +191,16 @@ class OcrService:
         if screen is None:
             return None
         x, y, w, h = screen
-        monitor = {"left": x, "top": y, "width": w, "height": h}
+        # 借鉴 Tau-main：优先 PrintWindow 后台抓图，失败回退 mss
         try:
-            shot = self._sct.grab(monitor)
+            import screen_capture as _sc
+            frame = _sc.capture_rect(
+                x, y, w, h, mc_window=self._mc,
+                use_print_window=self._grab_from_window,
+            )
+            if frame is not None:
+                return frame
+            shot = self._sct.grab({"left": x, "top": y, "width": w, "height": h})
             return np.array(shot)[:, :, :3]
         except Exception as e:
             self._log.error(f"OCR 截图失败 ({roi}): {e}")

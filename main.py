@@ -35,6 +35,7 @@ from navigation.map import WorldMap
 from navigation.movement import MovementPlanner
 from navigation.navigator import Navigator
 from vision import VisionDetector
+from log_watcher import LogWatcher
 
 
 CONFIG_PATH = "config.json"
@@ -58,6 +59,7 @@ class AutoFishingApp:
         self._world_map: Optional[WorldMap] = None
         self._movement: Optional[MovementPlanner] = None
         self._navigator: Optional[Navigator] = None
+        self._log_watcher: Optional[LogWatcher] = None
 
         self._task_queue: "queue.Queue[str]" = queue.Queue()
         self._exit_event = threading.Event()
@@ -76,14 +78,33 @@ class AutoFishingApp:
         self._detector = BiteDetector(
             self._mc, self._config.detection, self._config.roi, self._config.adaptive_rgb
         )
-        self._input = InputController(self._mc)
+        # 借鉴 Tau-main：后台抓图开关
+        self._detector._grab_from_window = self._config.window.grab_from_window
+        # 借鉴 Tau-main：输入模式 global/window
+        self._input = InputController(self._mc, input_mode=self._config.window.input_mode)
 
         # OCR 识别层 (阶段二/三)：后台独立线程，供 hybrid/ocr 确认咬钩 + 枯竭检测
         self._ocr = OcrService(self._mc, self._config.ocr)
+        self._ocr._grab_from_window = self._config.window.grab_from_window
         self._detector.set_ocr_service(self._ocr)
 
+        # 日志监听 (借鉴 Tau-main)：增量 tail latest.log 检测钓点枯竭，比 OCR 更可靠
+        if self._config.window.log_watch_enabled and self._config.window.log_watch_path:
+            self._log_watcher = LogWatcher(
+                log_path=self._config.window.log_watch_path,
+                interval_s=self._config.window.log_watch_interval_ms / 1000.0,
+            )
+            started = self._log_watcher.start()
+            if started:
+                self._log.success(f"日志监听已启动: {self._config.window.log_watch_path}")
+            else:
+                self._log_watcher = None
+        else:
+            self._log.info("日志监听未启用 (window.log_watch_enabled=false 或路径为空)")
+
         self._engine = FishingEngine(
-            self._config, self._mc, self._detector, self._input, self._ocr
+            self._config, self._mc, self._detector, self._input, self._ocr,
+            log_watcher=self._log_watcher,
         )
 
         # ocr.enabled=true 或 detection.mode ∈ {hybrid, ocr} 时启动 OCR 后台线程
@@ -115,11 +136,13 @@ class AutoFishingApp:
         # MovementPlanner + Navigator (共享 FishingEngine 的 stop/pause 事件)
         self._movement = MovementPlanner(
             self._input, self._engine._stop_event, self._engine._pause_event,
+            nav_cfg=self._config.navigation,
         )
         self._navigator = Navigator(
             self._config, self._mc, self._input, self._movement,
             vision=self._vision, world_map=self._world_map, ocr_service=self._ocr,
         )
+        self._navigator._grab_from_window = self._config.window.grab_from_window
         # 注入 Navigator 到 FishingEngine (DEPLETED 后自动寻路)
         self._engine._navigator = self._navigator
         if self._config.navigation.enabled:
@@ -424,6 +447,8 @@ class AutoFishingApp:
             self._engine.wait()
         if self._ocr is not None:
             self._ocr.close()
+        if self._log_watcher is not None:
+            self._log_watcher.close()
         if self._hotkeys is not None:
             self._hotkeys.unregister()
         if self._gui is not None:

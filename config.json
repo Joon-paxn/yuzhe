@@ -1,7 +1,12 @@
 {
     "window": {
         "title_keyword": "我的世界",
-        "check_interval_ms": 2000
+        "check_interval_ms": 2000,
+        "grab_from_window": false,
+        "input_mode": "global",
+        "log_watch_path": "",
+        "log_watch_interval_ms": 300,
+        "log_watch_enabled": false
     },
     "fishing": {
         "pull_interval_ms": 100,
@@ -61,7 +66,7 @@
         "height": 0.041970802919708027
     },
     "ocr": {
-        "enabled": false,
+        "enabled": true,
         "roi_x": 0.25,
         "roi_y": 0.55,
         "roi_width": 0.5,
@@ -73,10 +78,15 @@
         "depleted_roi_width": 0.4,
         "depleted_roi_height": 0.25,
         "depleted_confirm_ms": 1000,
-        "depleted_enabled": true
+        "depleted_enabled": true,
+        "coord_roi_x": 0.0,
+        "coord_roi_y": 0.93,
+        "coord_roi_width": 0.22,
+        "coord_roi_height": 0.05,
+        "coord_enabled": true
     },
     "vision": {
-        "enabled": false,
+        "enabled": true,
         "water_h_low": 85,
         "water_h_high": 110,
         "water_s_low": 40,
@@ -94,7 +104,7 @@
         "auto_save": true
     },
     "navigation": {
-        "enabled": false,
+        "enabled": true,
         "move_step_s": 0.5,
         "turn_step_px": 80,
         "turn_max_px": 400,
@@ -104,6 +114,44 @@
         "arrival_min_confidence": 0.4,
         "pathfind_grid_size": 1.0,
         "pathfind_max_steps": 500,
-        "pathfind_step_duration_s": 0.5
+        "pathfind_step_duration_s": 0.5,
+        "stuck_ratio_threshold": 0.02,
+        "stuck_trigger_count": 3,
+        "evasion_back_time": 0.8,
+        "evasion_turn_px": 200,
+        "dpi": 1320.0,
+        "sensitivity": 95.0,
+        "deg_per_pixel_factor": 0.15,
+        "deg_per_pixel_override": 0.0,
+        "angle_tolerance": 1.0,
+        "max_rotation_attempts": 3,
+        "rotation_retry_delay": 0.05,
+        "mouse_move_multiplier": 1.0,
+        "mouse_move_step": 20,
+        "mouse_move_delay": 0.005,
+        "player_speed": 5.625,
+        "arrival_dist": 1.5,
+        "t_to_i_distance": 15.0,
+        "per_check": 1.0,
+        "i_loop_max_iter": 10,
+        "walk_time_factor": 0.9,
+        "i_loop_min_walk_time": 0.05,
+        "i_loop_max_walk_time": 1.0,
+        "i_loop_post_walk_delay": 0.2,
+        "i_loop_adaptive_ratio": 0.6,
+        "i_loop_adaptive_max_walk": 2.0,
+        "stuck_threshold": 0.15,
+        "evasion_short_max": 3.0,
+        "evasion_long_min": 3.0,
+        "evasion_long_max": 5.0,
+        "evasion_short_probability": 0.8,
+        "evasion_cycle_interval": 3,
+        "water_float_timeout": 2.0,
+        "float_pitch_angle": 45.0,
+        "float_check_interval": 0.3,
+        "water_turn_tolerance": 5.0,
+        "water_jump_threshold": 63.0,
+        "eye_height": 1.62,
+        "forbidden_zones": []
     }
 }

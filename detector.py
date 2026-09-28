@@ -84,6 +84,8 @@ class BiteDetector:
         self._ada_cfg = adaptive_cfg or AdaptiveRGBConfig()
         self._log = get_logger()
         self._sct = mss.mss()
+        # 借鉴 Tau-main：是否用 PrintWindow 后台抓图
+        self._grab_from_window: bool = False
 
         self._template: Optional[np.ndarray] = None
         self._load_template()
@@ -252,10 +254,16 @@ class BiteDetector:
         if roi is None:
             return None, None, win_rect
         x, y, w, h = roi
-        monitor = {"left": x, "top": y, "width": w, "height": h}
+        # 借鉴 Tau-main：优先 PrintWindow 后台抓图，失败回退 mss
         try:
-            shot = self._sct.grab(monitor)
-            frame = np.array(shot)[:, :, :3]
+            import screen_capture as _sc
+            frame = _sc.capture_rect(
+                x, y, w, h, mc_window=self._mc,
+                use_print_window=self._grab_from_window,
+            )
+            if frame is None:
+                shot = self._sct.grab({"left": x, "top": y, "width": w, "height": h})
+                frame = np.array(shot)[:, :, :3]
             return frame, roi, win_rect
         except Exception as e:
             self._log.error(f"截图失败: {e}")

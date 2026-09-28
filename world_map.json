@@ -1,0 +1,33 @@
+{
+  "player": null,
+  "spots": {
+    "7538139b": {
+      "id": "7538139b",
+      "x": 100,
+      "y": 64,
+      "z": 100,
+      "used": false,
+      "depleted": true,
+      "confidence": 0.9,
+      "has_marker": false,
+      "last_visited": 0.0,
+      "visits": 0
+    },
+    "a15f7219": {
+      "id": "a15f7219",
+      "x": 120,
+      "y": 64,
+      "z": 100,
+      "used": false,
+      "depleted": false,
+      "confidence": 0.9,
+      "has_marker": false,
+      "last_visited": 0.0,
+      "visits": 0
+    }
+  },
+  "explored": [],
+  "water_areas": [],
+  "obstacles": [],
+  "current_spot_id": "7538139b"
+}

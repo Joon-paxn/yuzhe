@@ -187,6 +187,27 @@ class WorldMap:
     def all_spots(self) -> List[FishingSpot]:
         return list(self.spots.values())
 
+    def find_nearest_available(
+        self, x: float, z: float,
+        min_distance: float = 5.0,
+    ) -> Optional[FishingSpot]:
+        """
+        找最近的可用钓点 (未枯竭)，且距离当前位置 >= min_distance。
+        借鉴 Tau 的 exclude_spot_distance 机制：排除当前位置附近的枯竭点。
+        """
+        best: Optional[FishingSpot] = None
+        best_dist = float("inf")
+        for spot in self.spots.values():
+            if spot.depleted:
+                continue
+            d = spot.distance_xz_to(x, z)
+            if d < min_distance:
+                continue  # 排除太近的 (当前枯竭点附近)
+            if d < best_dist:
+                best_dist = d
+                best = spot
+        return best
+
     def candidate_spots(self) -> List[FishingSpot]:
         """候选钓点：未枯竭 (used 不排除，可重复到访未枯竭的钓点)"""
         return [s for s in self.spots.values() if not s.depleted]

@@ -42,6 +42,7 @@ from input_controller import InputController
 from minecraft_window import MinecraftWindow
 from logger import get_logger
 from ocr import OcrService
+from log_watcher import LogWatcher
 
 
 class State(Enum):
@@ -68,6 +69,7 @@ class FishingEngine:
         input_ctrl: InputController,
         ocr_service: Optional[OcrService] = None,
         navigator: Optional["object"] = None,
+        log_watcher: Optional[LogWatcher] = None,
     ) -> None:
         self._cfg = config
         self._mc = mc_window
@@ -75,6 +77,7 @@ class FishingEngine:
         self._input = input_ctrl
         self._ocr = ocr_service
         self._navigator = navigator
+        self._log_watcher = log_watcher
         self._log = get_logger()
 
         self._state: State = State.WAITING_BITE
@@ -89,6 +92,8 @@ class FishingEngine:
 
         # 阶段八：导航子状态 (供 GUI 显示 Navigator 当前阶段)
         self._nav_substate: str = ""
+        # 初始钓点是否已记录 (首次等待咬钩时用 OCR 坐标记录)
+        self._initial_spot_recorded: bool = False
 
         self._thread: Optional[threading.Thread] = None
 
@@ -232,18 +237,28 @@ class FishingEngine:
 
     def _check_depleted(self) -> bool:
         """
-        检查钓点是否枯竭。OCR 在独立后台线程持续识别「鱼群：枯竭」面板，
-        本方法只读最新 GameState，不阻塞。
-        要求枯竭持续 depleted_confirm_ms 才确认，避免 OCR 闪烁误判。
+        检查钓点是否枯竭。
+        - 优先使用日志监听 (LogWatcher，更可靠)；日志命中 "枯竭" 立即确认。
+        - 日志未命中时回退 OCR 识别 (需持续 depleted_confirm_ms 确认)。
         """
         if not self._cfg.ocr.depleted_enabled:
             return False
+
+        # 1. 日志监听 (借鉴 Tau-main，首选)
+        if self._log_watcher is not None and self._log_watcher.is_running:
+            match = self._log_watcher.get_latest_match()
+            if match is not None and match.action == "depleted":
+                self._log.info(f"日志检测到钓点枯竭: {match.line[:60]}")
+                # 日志命中即确认，清除避免重复
+                self._log_watcher.pop_latest_match()
+                return True
+
+        # 2. OCR 回退 (持续确认避免闪烁)
         if not self._ocr_ready():
             if not self._depleted_warned:
                 self._depleted_warned = True
                 self._log.warn(
-                    "钓点枯竭检测需要 OCR 服务运行 (ocr.enabled=true 或检测模式为 "
-                    "hybrid/ocr)，当前 OCR 不可用，枯竭检测关闭。"
+                    "钓点枯竭检测需要 OCR 服务或日志监听，当前均不可用，枯竭检测关闭。"
                 )
             return False
         state = self._ocr.get_latest_state()
@@ -252,7 +267,7 @@ class FishingEngine:
         if depleted:
             if self._depleted_since == 0.0:
                 self._depleted_since = now
-                self._log.info("检测到疑似钓点枯竭，正在确认...")
+                self._log.info("OCR 检测到疑似钓点枯竭，正在确认...")
                 return False
             confirm_s = self._cfg.ocr.depleted_confirm_ms / 1000.0
             if now - self._depleted_since >= confirm_s:
@@ -336,6 +351,9 @@ class FishingEngine:
     def _state_waiting_bite(self) -> None:
         """WAITING_BITE: 循环截图检测咬钩"""
         self._log.info("等待咬钩...")
+        # 首次进入：用 OCR 坐标记录当前初始钓点 (供后续枯竭时坐标导航)
+        if not self._initial_spot_recorded:
+            self._record_initial_spot()
         interval = self._cfg.detection.screenshot_interval_ms / 1000.0
 
         while not self._stop_event.is_set() and not self._pause_event.is_set():
@@ -377,6 +395,22 @@ class FishingEngine:
                 self._state = State.PULLING
                 return
             self._interruptible_sleep(interval)
+
+    def _record_initial_spot(self) -> None:
+        """用 OCR 坐标记录当前位置为初始钓点 (供枯竭时坐标导航使用)"""
+        self._initial_spot_recorded = True
+        if self._navigator is None or self._navigator._map is None:
+            return
+        if self._ocr is None:
+            return
+        state = self._ocr.get_latest_state()
+        if state is None or state.xyz is None:
+            self._log.info("OCR 坐标暂不可用，初始钓点未记录 (将使用视觉搜索)")
+            return
+        x, y, z = state.xyz
+        spot_id = self._navigator._map.add_spot(x, y, z, confidence=0.8)
+        self._navigator._map.set_current(spot_id)
+        self._log.info(f"已记录初始钓点 {spot_id}=({x:.1f},{y:.1f},{z:.1f})")
 
     def _state_pulling(self) -> None:
         """PULLING: 检测到咬钩后右键点击一次（收竿拉鱼）"""
