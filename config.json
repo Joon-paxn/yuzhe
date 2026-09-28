@@ -87,5 +87,10 @@
         "min_texture_std": 15,
         "analyze_terrain": true,
         "min_obstacle_area": 200
+    },
+    "map": {
+        "spot_dedup_distance": 3.0,
+        "persistence_path": "world_map.json",
+        "auto_save": true
     }
 }

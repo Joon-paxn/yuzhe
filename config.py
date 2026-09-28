@@ -125,6 +125,18 @@ class VisionConfig:
 
 
 @dataclass
+class MapConfig:
+    """世界地图配置 (阶段五)
+
+    地图模型记录玩家位置、已知钓点 (used/depleted)、已探索区域、已知水域/障碍。
+    边探索边建图；钓点按位置去重；支持 JSON 持久化以跨会话保留探索成果。
+    """
+    spot_dedup_distance: float = 3.0      # 钓点去重距离 (方块，小于此距离视为同一钓点)
+    persistence_path: str = "world_map.json"  # 地图持久化文件
+    auto_save: bool = True                # 修改后是否自动保存
+
+
+@dataclass
 class HotkeyConfig:
     """全局快捷键配置"""
     toggle: str = "f6"
@@ -155,6 +167,7 @@ class AppConfig:
     adaptive_rgb: AdaptiveRGBConfig = field(default_factory=AdaptiveRGBConfig)
     ocr: OcrConfig = field(default_factory=OcrConfig)
     vision: VisionConfig = field(default_factory=VisionConfig)
+    map: MapConfig = field(default_factory=MapConfig)
 
 
 _DEFAULT_CONFIG = AppConfig()
@@ -214,6 +227,7 @@ def load_config(config_path: str) -> AppConfig:
             adaptive_rgb=AdaptiveRGBConfig(**_filter_fields(AdaptiveRGBConfig, merged_dict.get("adaptive_rgb", {}))),
             ocr=OcrConfig(**_filter_fields(OcrConfig, merged_dict.get("ocr", {}))),
             vision=VisionConfig(**_filter_fields(VisionConfig, merged_dict.get("vision", {}))),
+            map=MapConfig(**_filter_fields(MapConfig, merged_dict.get("map", {}))),
         )
     except TypeError as e:
         print(f"[config] 配置字段错误，使用默认配置: {e}")
@@ -429,3 +443,10 @@ def _validate_config(config: AppConfig) -> None:
         vis.min_texture_std = 0
     if vis.min_obstacle_area < 50:
         vis.min_obstacle_area = 50
+
+    # 地图模型参数校验
+    mp = config.map
+    if mp.spot_dedup_distance < 0.5:
+        mp.spot_dedup_distance = 0.5
+    if not mp.persistence_path:
+        mp.persistence_path = "world_map.json"
