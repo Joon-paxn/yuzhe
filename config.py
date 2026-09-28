@@ -36,6 +36,12 @@ class FishingConfig:
 @dataclass
 class DetectionConfig:
     """咬钩检测配置"""
+    # ---- 阶段二：检测策略 ----
+    # "rgb"     : 仅 RGB 双检测点 (默认，现有行为)
+    # "ocr"     : 仅 OCR 文字识别「咬钩」
+    # "hybrid"  : RGB 双检测点先发现候选，OCR 在时间窗口内确认
+    mode: str = "rgb"
+    ocr_confirm_window_ms: int = 1200     # hybrid: OCR 确认时间窗口
     use_template_matching: bool = False  # 是否使用模板匹配
     template_match_threshold: float = 0.80  # 模板匹配置信度阈值 (0~1)
     use_color_detection: bool = False    # 是否使用目标颜色检测 (取色器选取)
@@ -267,6 +273,14 @@ def _validate_config(config: AppConfig) -> None:
     det = config.detection
     fish = config.fishing
     ada = config.adaptive_rgb
+
+    # 检测模式校验
+    if det.mode not in ("rgb", "ocr", "hybrid"):
+        print(f"[config] detection.mode={det.mode!r} 非法，已重置为 'rgb'")
+        det.mode = "rgb"
+    if det.ocr_confirm_window_ms < 100:
+        det.ocr_confirm_window_ms = 100
+        print("[config] ocr_confirm_window_ms 过小，已修正为 100ms")
 
     if fish.pull_interval_ms < 10:
         fish.pull_interval_ms = 10

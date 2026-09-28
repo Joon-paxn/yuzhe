@@ -10,6 +10,8 @@
         "recast_delay_max_ms": 5000
     },
     "detection": {
+        "mode": "rgb",
+        "ocr_confirm_window_ms": 1200,
         "use_template_matching": false,
         "template_match_threshold": 0.8,
         "use_color_detection": true,

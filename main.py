@@ -73,13 +73,20 @@ class AutoFishingApp:
             self._config, self._mc, self._detector, self._input
         )
 
-        # OCR 识别层 (阶段一基础框架)：后台独立线程，不接入钓鱼状态机
-        # enabled=False 或未安装 OCR 库时不启动，现有钓鱼检测完全不受影响
+        # OCR 识别层 (阶段二)：后台独立线程，供 hybrid/ocr 模式确认咬钩
+        # ocr.enabled=true 或 detection.mode ∈ {hybrid, ocr} 时启动
         self._ocr = OcrService(self._mc, self._config.ocr)
-        if self._config.ocr.enabled:
-            self._ocr.start()
+        self._detector.set_ocr_service(self._ocr)
+        need_ocr = self._config.ocr.enabled or self._config.detection.mode in ("hybrid", "ocr")
+        if need_ocr:
+            started = self._ocr.start()
+            if not started:
+                self._log.warn(
+                    f"检测模式={self._config.detection.mode!r} 需要 OCR，但 OCR 引擎不可用，"
+                    f"将回退到 RGB 检测。请安装 rapidocr onnxruntime。"
+                )
         else:
-            self._log.info("OCR 层未启用 (ocr.enabled=false)，现有钓鱼检测不受影响")
+            self._log.info("OCR 层未启用 (ocr.enabled=false 且 mode=rgb)，现有钓鱼检测不受影响")
 
         self._hotkeys = HotkeyManager(self._config.hotkeys)
         self._hotkeys.on_toggle = self._on_toggle

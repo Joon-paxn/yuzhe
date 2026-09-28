@@ -29,6 +29,7 @@ from config import DetectionConfig, RoiConfig, AdaptiveRGBConfig
 from minecraft_window import MinecraftWindow, WindowRect
 from logger import get_logger
 from adaptive_rgb import AdaptiveColorModel
+from ocr import OcrService, GameState
 
 
 TEMPLATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bite_template.png")
@@ -61,6 +62,10 @@ class DetectionResult:
     b_in_range: bool = False
     a_current_rgb: Tuple[int, int, int] = (0, 0, 0)
     b_current_rgb: Tuple[int, int, int] = (0, 0, 0)
+    # ---- 阶段二：OCR 混合检测 ----
+    ocr_used: bool = False                     # 本次检测是否启用 OCR 层
+    ocr_confirmed: bool = False                # OCR 是否确认咬钩
+    ocr_pending: bool = False                  # hybrid: 正在等待 OCR 确认
 
 
 class BiteDetector:
@@ -85,6 +90,12 @@ class BiteDetector:
 
         self._confirm_count: int = 0
         self._cooldown_until: float = 0.0
+
+        # 阶段二：OCR 混合检测
+        self._ocr_service: Optional[OcrService] = None
+        self._pending_ocr: bool = False          # hybrid: RGB 候选已通过，等待 OCR 确认
+        self._pending_ocr_since: float = 0.0
+        self._ocr_fallback_warned: bool = False  # OCR 不可用回退警告 (只提示一次)
 
         # 阶段二：A、B 各自一个自适应模型实例，持久化在检测器上
         self._model_a = AdaptiveColorModel(
@@ -126,6 +137,33 @@ class BiteDetector:
         self._model_a.reset()
         self._model_b.reset()
 
+    # ---------------- OCR 接入 (阶段二) ----------------
+
+    def set_ocr_service(self, ocr_service: Optional[OcrService]) -> None:
+        """注入 OCR 服务，供 hybrid / ocr 模式确认咬钩。为 None 则回退 RGB。"""
+        self._ocr_service = ocr_service
+
+    def _ocr_available(self) -> bool:
+        """OCR 服务是否就绪 (已注入、引擎可用、正在运行)"""
+        return (
+            self._ocr_service is not None
+            and self._ocr_service.engine_available
+            and self._ocr_service.is_running
+        )
+
+    def _get_ocr_state(self) -> Optional[GameState]:
+        if not self._ocr_available():
+            return None
+        return self._ocr_service.get_latest_state()
+
+    def _warn_ocr_fallback(self) -> None:
+        if not self._ocr_fallback_warned:
+            self._ocr_fallback_warned = True
+            self._log.warn(
+                f"检测模式={self._det_cfg.mode!r} 需要 OCR，但 OCR 服务不可用，"
+                f"临时回退到 RGB 检测。请启用 ocr.enabled 并安装 rapidocr。"
+            )
+
     def get_adaptive_snapshot(self) -> dict:
         """返回 A/B 模型状态快照，供外部显示"""
         return {"a": self._model_a.snapshot(), "b": self._model_b.snapshot()}
@@ -166,6 +204,16 @@ class BiteDetector:
         return self._template is not None
 
     def get_mode_name(self) -> str:
+        mode = self._det_cfg.mode
+        if mode == "ocr":
+            return "OCR 文字识别"
+        base = self._rgb_mode_name()
+        if mode == "hybrid":
+            return f"混合({base})"
+        return base
+
+    def _rgb_mode_name(self) -> str:
+        """RGB 层检测模式名 (不含 hybrid/ocr 前缀)"""
         if self._det_cfg.use_template_matching and self._template is not None:
             return "模板匹配"
         if self._det_cfg.use_color_detection:
@@ -437,14 +485,37 @@ class BiteDetector:
         )
 
     def detect_bite(self) -> DetectionResult:
-        """带连续帧确认 + 冷却的咬钩检测"""
+        """
+        带连续帧确认 + 冷却的咬钩检测。
+
+        阶段二按 detection.mode 分流：
+        - "rgb":    仅 RGB 双检测点 (现有行为)
+        - "ocr":    仅 OCR 文字识别「咬钩」
+        - "hybrid": RGB 双检测点先发现候选，OCR 在时间窗口内确认
+        OCR 不可用时 hybrid/ocr 自动回退到 rgb (只警告一次)。
+        """
+        mode = self._det_cfg.mode
+        if mode == "ocr":
+            if not self._ocr_available():
+                self._warn_ocr_fallback()
+                return self._detect_bite_rgb()
+            return self._detect_bite_ocr()
+        if mode == "hybrid":
+            if not self._ocr_available():
+                self._warn_ocr_fallback()
+                return self._detect_bite_rgb()
+            return self._detect_bite_hybrid()
+        return self._detect_bite_rgb()
+
+    # ---------------- rgb 模式 (现有逻辑) ----------------
+
+    def _detect_bite_rgb(self) -> DetectionResult:
+        """RGB 双检测点：连续帧确认 + 冷却"""
         result = self.detect_once()
         now = time.monotonic()
-
         if now < self._cooldown_until:
             result.bite_detected = False
             return result
-
         if result.bite_detected:
             self._confirm_count += 1
             if self._confirm_count >= self._det_cfg.bite_confirm_frames:
@@ -454,14 +525,98 @@ class BiteDetector:
                 return result
         else:
             self._confirm_count = 0
+        result.bite_detected = False
+        return result
 
+    # ---------------- ocr 模式 ----------------
+
+    def _detect_bite_ocr(self) -> DetectionResult:
+        """OCR 文字识别：连续帧确认 + 冷却"""
+        result = self.detect_once()  # 仍采集 RGB 用于状态显示
+        result.ocr_used = True
+        now = time.monotonic()
+        if now < self._cooldown_until:
+            result.bite_detected = False
+            return result
+        state = self._get_ocr_state()
+        ocr_bite = bool(state and state.bite_detected)
+        result.ocr_confirmed = ocr_bite
+        if ocr_bite:
+            self._confirm_count += 1
+            if self._confirm_count >= self._det_cfg.bite_confirm_frames:
+                self._confirm_count = 0
+                self._cooldown_until = now + self._det_cfg.bite_cooldown_ms / 1000.0
+                result.bite_detected = True
+                self._log.info("检测到咬钩！ [OCR] 文字层确认「咬钩」")
+                return result
+        else:
+            self._confirm_count = 0
+        result.bite_detected = False
+        return result
+
+    # ---------------- hybrid 模式 ----------------
+
+    def _detect_bite_hybrid(self) -> DetectionResult:
+        """
+        RGB 双检测点先发现候选 → OCR 在时间窗口内确认。
+        - RGB 连续帧确认通过后进入 _pending_ocr 等待态
+        - 等待期内 OCR 识别到「咬钩」即确认；超时则丢弃候选
+        """
+        result = self.detect_once()
+        result.ocr_used = True
+        now = time.monotonic()
+        if now < self._cooldown_until:
+            result.bite_detected = False
+            return result
+
+        # 等待 OCR 确认
+        if self._pending_ocr:
+            result.ocr_pending = True
+            state = self._get_ocr_state()
+            ocr_ts = self._ocr_service.last_recog_ts if self._ocr_service else 0.0
+            # OCR 已在等待期内刷新且识别到咬钩 → 确认
+            if state and state.bite_detected and ocr_ts >= self._pending_ocr_since:
+                self._pending_ocr = False
+                self._confirm_count = 0
+                self._cooldown_until = now + self._det_cfg.bite_cooldown_ms / 1000.0
+                result.bite_detected = True
+                result.ocr_confirmed = True
+                self._log.info("检测到咬钩！ [hybrid] RGB 候选 + OCR 确认「咬钩」")
+                return result
+            # 超时未确认 → 丢弃
+            window_s = self._det_cfg.ocr_confirm_window_ms / 1000.0
+            if now - self._pending_ocr_since > window_s:
+                self._pending_ocr = False
+                self._confirm_count = 0
+                result.bite_detected = False
+                result.ocr_confirmed = False
+                self._log.info(
+                    f"咬钩候选未确认 [hybrid]: OCR 在 {window_s:.1f}s 内未确认，丢弃"
+                )
+                return result
+            # 仍在等待
+            result.bite_detected = False
+            return result
+
+        # 正常 RGB 检测：连续帧确认 → 进入 OCR 等待
+        if result.bite_detected:
+            self._confirm_count += 1
+            if self._confirm_count >= self._det_cfg.bite_confirm_frames:
+                self._pending_ocr = True
+                self._pending_ocr_since = now
+                self._confirm_count = 0
+                self._log.info("咬钩候选 [hybrid]: RGB 双检测点通过，等待 OCR 确认...")
+        else:
+            self._confirm_count = 0
         result.bite_detected = False
         return result
 
     def reset(self) -> None:
-        """重置确认计数和冷却 (不重置自适应模型历史)"""
+        """重置确认计数、冷却与 OCR 等待态 (不重置自适应模型历史)"""
         self._confirm_count = 0
         self._cooldown_until = 0.0
+        self._pending_ocr = False
+        self._pending_ocr_since = 0.0
 
     def close(self) -> None:
         try:
