@@ -102,6 +102,29 @@ class OcrConfig:
 
 
 @dataclass
+class VisionConfig:
+    """视觉识别层配置 (阶段四)
+
+    水域检测基于 OpenCV HSV 阈值分割 + 连通域分析。
+    HSV 使用 OpenCV 标度：H∈[0,179] S/V∈[0,255]。
+    默认阈值针对青蓝色调水域 (本服水面 hue≈170-200° → OpenCV H 85-100)，
+    光照/资源包不同时需校准。enabled=False 时视觉层不运行，不影响现有功能。
+    """
+    enabled: bool = False                 # 是否启用视觉识别 (默认关闭)
+    # 水域 HSV 阈值 (OpenCV 标度)
+    water_h_low: int = 85                 # 水色色相下界 (≈170°)
+    water_h_high: int = 110               # 水色色相上界 (≈220°，含偏蓝水)
+    water_s_low: int = 40                 # 饱和度下界 (排除近灰石头)
+    water_s_high: int = 255
+    water_v_low: int = 40                 # 明度下界 (排除纯黑阴影)
+    water_v_high: int = 240               # 明度上界 (排除纯白反光)
+    min_water_area: int = 500             # 水域连通域最小像素面积 (过滤噪点)
+    min_texture_std: int = 15             # 水域纹理标准差下限 (水面有网格纹理，平滑天空会被拒绝)
+    analyze_terrain: bool = True          # 是否分析地形 (草地/沙/石/障碍)
+    min_obstacle_area: int = 200          # 障碍连通域最小像素面积
+
+
+@dataclass
 class HotkeyConfig:
     """全局快捷键配置"""
     toggle: str = "f6"
@@ -131,6 +154,7 @@ class AppConfig:
     roi: RoiConfig = field(default_factory=RoiConfig)
     adaptive_rgb: AdaptiveRGBConfig = field(default_factory=AdaptiveRGBConfig)
     ocr: OcrConfig = field(default_factory=OcrConfig)
+    vision: VisionConfig = field(default_factory=VisionConfig)
 
 
 _DEFAULT_CONFIG = AppConfig()
@@ -189,6 +213,7 @@ def load_config(config_path: str) -> AppConfig:
             roi=RoiConfig(**_filter_fields(RoiConfig, merged_dict.get("roi", {}))),
             adaptive_rgb=AdaptiveRGBConfig(**_filter_fields(AdaptiveRGBConfig, merged_dict.get("adaptive_rgb", {}))),
             ocr=OcrConfig(**_filter_fields(OcrConfig, merged_dict.get("ocr", {}))),
+            vision=VisionConfig(**_filter_fields(VisionConfig, merged_dict.get("vision", {}))),
         )
     except TypeError as e:
         print(f"[config] 配置字段错误，使用默认配置: {e}")
@@ -389,3 +414,18 @@ def _validate_config(config: AppConfig) -> None:
     if ocr.depleted_confirm_ms < 200:
         ocr.depleted_confirm_ms = 200
         print("[config] ocr.depleted_confirm_ms 过小，已修正为 200ms")
+
+    # 视觉识别层参数校验
+    vis = config.vision
+    vis.water_h_low = max(0, min(179, vis.water_h_low))
+    vis.water_h_high = max(0, min(179, vis.water_h_high))
+    vis.water_s_low = max(0, min(255, vis.water_s_low))
+    vis.water_s_high = max(0, min(255, vis.water_s_high))
+    vis.water_v_low = max(0, min(255, vis.water_v_low))
+    vis.water_v_high = max(0, min(255, vis.water_v_high))
+    if vis.min_water_area < 50:
+        vis.min_water_area = 50
+    if vis.min_texture_std < 0:
+        vis.min_texture_std = 0
+    if vis.min_obstacle_area < 50:
+        vis.min_obstacle_area = 50

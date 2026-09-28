@@ -74,5 +74,18 @@
         "depleted_roi_height": 0.25,
         "depleted_confirm_ms": 1000,
         "depleted_enabled": true
+    },
+    "vision": {
+        "enabled": false,
+        "water_h_low": 85,
+        "water_h_high": 110,
+        "water_s_low": 40,
+        "water_s_high": 255,
+        "water_v_low": 40,
+        "water_v_high": 240,
+        "min_water_area": 500,
+        "min_texture_std": 15,
+        "analyze_terrain": true,
+        "min_obstacle_area": 200
     }
 }
