@@ -198,10 +198,17 @@ class FishingEngine:
 
             result = self._detector.detect_bite()
             if result.bite_detected:
-                self._log.info(
-                    f"检测到咬钩！ (匹配度={result.match_score:.3f}, "
-                    f"大连通域白像素={result.large_white_pixels})"
-                )
+                if result.dual_color_used:
+                    self._log.info(
+                        f"检测到咬钩！ [双重取色] "
+                        f"A:通过({result.color_a_large}px) "
+                        f"B:通过({result.color_b_large}px)"
+                    )
+                else:
+                    self._log.info(
+                        f"检测到咬钩！ (匹配度={result.match_score:.3f}, "
+                        f"大连通域白像素={result.large_white_pixels})"
+                    )
                 self._state = State.PULLING
                 return
 
