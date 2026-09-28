@@ -57,5 +57,14 @@
         "y": 0.5255474452554745,
         "width": 0.07128099173553719,
         "height": 0.041970802919708027
+    },
+    "ocr": {
+        "enabled": false,
+        "roi_x": 0.25,
+        "roi_y": 0.55,
+        "roi_width": 0.5,
+        "roi_height": 0.15,
+        "interval_ms": 500,
+        "min_confidence": 0.5
     }
 }

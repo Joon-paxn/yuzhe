@@ -30,6 +30,7 @@ from region_selector import select_roi_relative
 from pixel_picker import pick_pixel_color, pick_pixel_colors, pick_pixel_colors_with_pos
 from gui import FishingGUI
 from logger import get_logger
+from ocr import OcrService
 
 
 CONFIG_PATH = "config.json"
@@ -48,6 +49,7 @@ class AutoFishingApp:
         self._engine: Optional[FishingEngine] = None
         self._hotkeys: Optional[HotkeyManager] = None
         self._gui: Optional[FishingGUI] = None
+        self._ocr: Optional[OcrService] = None
 
         self._task_queue: "queue.Queue[str]" = queue.Queue()
         self._exit_event = threading.Event()
@@ -70,6 +72,14 @@ class AutoFishingApp:
         self._engine = FishingEngine(
             self._config, self._mc, self._detector, self._input
         )
+
+        # OCR 识别层 (阶段一基础框架)：后台独立线程，不接入钓鱼状态机
+        # enabled=False 或未安装 OCR 库时不启动，现有钓鱼检测完全不受影响
+        self._ocr = OcrService(self._mc, self._config.ocr)
+        if self._config.ocr.enabled:
+            self._ocr.start()
+        else:
+            self._log.info("OCR 层未启用 (ocr.enabled=false)，现有钓鱼检测不受影响")
 
         self._hotkeys = HotkeyManager(self._config.hotkeys)
         self._hotkeys.on_toggle = self._on_toggle
@@ -360,6 +370,8 @@ class AutoFishingApp:
         if self._engine is not None:
             self._engine.stop()
             self._engine.wait()
+        if self._ocr is not None:
+            self._ocr.close()
         if self._hotkeys is not None:
             self._hotkeys.unregister()
         if self._gui is not None:

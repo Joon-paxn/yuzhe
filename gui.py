@@ -49,6 +49,7 @@ class FishingGUI:
         self._params_var: Optional[tk.StringVar] = None
         self._color_var: Optional[tk.StringVar] = None
         self._adaptive_var: Optional[tk.StringVar] = None  # 自适应模型状态
+        self._ocr_var: Optional[tk.StringVar] = None        # OCR 识别层状态
 
         self._btn_toggle: Optional[ttk.Button] = None
         self._color_preview: Optional[tk.Canvas] = None
@@ -68,6 +69,7 @@ class FishingGUI:
         self._params_var = tk.StringVar(value="")
         self._color_var = tk.StringVar(value="")
         self._adaptive_var = tk.StringVar(value="")
+        self._ocr_var = tk.StringVar(value="")
 
         root.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -103,6 +105,11 @@ class FishingGUI:
         # 自适应模型状态行
         ttk.Label(
             info_frame, textvariable=self._adaptive_var, foreground="#0066cc",
+        ).pack(anchor="w", pady=(2, 0))
+
+        # OCR 识别层状态行 (阶段一)
+        ttk.Label(
+            info_frame, textvariable=self._ocr_var, foreground="#6a3a8c",
         ).pack(anchor="w", pady=(2, 0))
 
         # ---- 操作按钮区 ----
@@ -195,6 +202,7 @@ class FishingGUI:
             if now - self._last_adaptive_check >= ADAPTIVE_REFRESH_MS / 1000.0:
                 self._last_adaptive_check = now
                 self._update_adaptive_status()
+                self._update_ocr_status()
             self._update_status()
         except Exception as exc:
             app._log.error(f"tick 状态检查异常: {exc}")
@@ -367,6 +375,36 @@ class FishingGUI:
             f"自适应 A: Ref={a_ref_s} N={sa['samples']} ±{a_tol[0]} [{a_ready}] | "
             f"B: Ref={b_ref_s} N={sb['samples']} ±{b_tol[0]} [{b_ready}]"
         )
+
+    def _update_ocr_status(self) -> None:
+        """实时刷新 OCR 识别层状态 (阶段一：仅显示，不接入钓鱼)"""
+        ocr = self._app._ocr
+        ocr_cfg = self._app._config.ocr
+        if ocr is None:
+            self._ocr_var.set("")
+            return
+        if not ocr_cfg.enabled:
+            self._ocr_var.set("OCR: 未启用 (ocr.enabled=false)")
+            return
+        if not ocr.engine_available:
+            self._ocr_var.set(f"OCR: 引擎不可用 ({ocr.engine_name})，需安装 rapidocr")
+            return
+        state = ocr.get_latest_state()
+        result = ocr.get_latest()
+        parts = [f"OCR: {ocr.engine_name}"]
+        if ocr.is_running:
+            parts.append("运行中")
+        if state.bite_detected:
+            parts.append("咬钩✓")
+        if state.depleted:
+            parts.append("钓点枯竭✓")
+        if state.xyz is not None:
+            parts.append(f"XYZ={state.xyz}")
+        if result.available:
+            parts.append(f"文本={result.full_text!r}")
+        elif result.error:
+            parts.append(f"({result.error})")
+        self._ocr_var.set(" | ".join(parts))
 
     def destroy(self) -> None:
         if self._root is not None and self._root.winfo_exists():

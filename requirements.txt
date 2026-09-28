@@ -5,3 +5,7 @@ pyautogui>=0.9.54
 keyboard>=0.13.5
 pygetwindow>=0.0.9
 pywin32>=306; sys_platform == "win32"
+# OCR 识别层 (阶段一)。未安装时程序自动降级，现有钓鱼检测不受影响。
+# 二选一即可：rapidocr (新版) 或 rapidocr-onnxruntime (旧版)
+rapidocr>=3.0.0
+onnxruntime>=1.16.0

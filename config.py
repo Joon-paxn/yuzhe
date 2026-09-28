@@ -70,6 +70,22 @@ class AdaptiveRGBConfig:
 
 
 @dataclass
+class OcrConfig:
+    """OCR 识别层配置 (阶段一基础框架)
+
+    OCR ROI 以相对 Minecraft 窗口的归一化坐标保存，适配不同分辨率与窗口位置。
+    enabled=False 时后台 OCR 服务不启动，现有钓鱼检测逻辑完全不受影响。
+    """
+    enabled: bool = False                 # 是否启用 OCR 服务 (默认关闭，保持现有行为)
+    roi_x: float = 0.25                   # OCR 检测区域 x (相对窗口比例)
+    roi_y: float = 0.55                   # OCR 检测区域 y
+    roi_width: float = 0.50               # OCR 检测区域 width
+    roi_height: float = 0.15              # OCR 检测区域 height
+    interval_ms: int = 500                # 后台 OCR 识别间隔 (毫秒)
+    min_confidence: float = 0.5           # 识别置信度下限 (低于此值的行丢弃)
+
+
+@dataclass
 class HotkeyConfig:
     """全局快捷键配置"""
     toggle: str = "f6"
@@ -98,6 +114,7 @@ class AppConfig:
     hotkeys: HotkeyConfig = field(default_factory=HotkeyConfig)
     roi: RoiConfig = field(default_factory=RoiConfig)
     adaptive_rgb: AdaptiveRGBConfig = field(default_factory=AdaptiveRGBConfig)
+    ocr: OcrConfig = field(default_factory=OcrConfig)
 
 
 _DEFAULT_CONFIG = AppConfig()
@@ -155,6 +172,7 @@ def load_config(config_path: str) -> AppConfig:
             hotkeys=HotkeyConfig(**_filter_fields(HotkeyConfig, merged_dict.get("hotkeys", {}))),
             roi=RoiConfig(**_filter_fields(RoiConfig, merged_dict.get("roi", {}))),
             adaptive_rgb=AdaptiveRGBConfig(**_filter_fields(AdaptiveRGBConfig, merged_dict.get("adaptive_rgb", {}))),
+            ocr=OcrConfig(**_filter_fields(OcrConfig, merged_dict.get("ocr", {}))),
         )
     except TypeError as e:
         print(f"[config] 配置字段错误，使用默认配置: {e}")
@@ -322,3 +340,18 @@ def _validate_config(config: AppConfig) -> None:
             setattr(roi, attr, 0.0)
         elif val > 1:
             setattr(roi, attr, 1.0)
+
+    # OCR 配置校验
+    ocr = config.ocr
+    for attr in ("roi_x", "roi_y", "roi_width", "roi_height"):
+        v = getattr(ocr, attr)
+        if v < 0.0:
+            setattr(ocr, attr, 0.0)
+        elif v > 1.0:
+            setattr(ocr, attr, 1.0)
+    if ocr.interval_ms < 50:
+        ocr.interval_ms = 50
+        print("[config] ocr.interval_ms 过小，已修正为 50ms")
+    if ocr.min_confidence < 0.0 or ocr.min_confidence > 1.0:
+        ocr.min_confidence = max(0.0, min(1.0, ocr.min_confidence))
+        print("[config] ocr.min_confidence 超出范围，已修正")
