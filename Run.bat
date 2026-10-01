@@ -92,7 +92,14 @@ endlocal
 exit /b %errorlevel%
 
 :refresh_path
-REM winget 装完 Python 后当前会话 PATH 不会自动刷新，手动补常见安装路径
+REM winget 装完 Python 后当前会话 PATH 不会自动刷新，先从注册表重读 系统+用户 PATH
+set "SYS_PATH="
+set "USER_PATH="
+for /f "tokens=2*" %%A in ('reg query "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v Path 2^>nul ^| findstr /i "REG_"') do set "SYS_PATH=%%B"
+for /f "tokens=2*" %%A in ('reg query "HKCU\Environment" /v Path 2^>nul ^| findstr /i "REG_"') do set "USER_PATH=%%B"
+REM call 触发二次展开，将注册表 REG_EXPAND_SZ 中的 %%SystemRoot%% 等变量正确展开
+if defined SYS_PATH if defined USER_PATH call set "PATH=%SYS_PATH%;%USER_PATH%"
+REM 兜底：再手动补充常见 Python 安装路径，防止注册表读取失败
 set "PATH=%LOCALAPPDATA%\Programs\Python\Python312\;%LOCALAPPDATA%\Programs\Python\Python312\Scripts\;%PATH%"
 set "PATH=%ProgramFiles%\Python312\;%ProgramFiles%\Python312\Scripts\;%PATH%"
 set "PATH=%LOCALAPPDATA%\Programs\Python\Python313\;%LOCALAPPDATA%\Programs\Python\Python313\Scripts\;%PATH%"
