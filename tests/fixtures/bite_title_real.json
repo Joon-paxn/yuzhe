@@ -1,0 +1,15 @@
+{
+  "source": "C:\\Users\\Jiulin\\Pictures\\Snow Shot\\SnowShot_2026-10-08_15-46-15.png",
+  "source_size": [
+    1063,
+    819
+  ],
+  "crop_box": [
+    296,
+    538,
+    418,
+    600
+  ],
+  "expected_normalized": "咬钩",
+  "source_type": "application_preview"
+}

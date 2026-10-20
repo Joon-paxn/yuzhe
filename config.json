@@ -1,0 +1,77 @@
+{
+  "window": {
+    "title_keyword": "WinIsland",
+    "process_names": [
+      "WinIsland.exe",
+      "javaw.exe",
+      "java.exe",
+      "Minecraft.exe"
+    ]
+  },
+  "roi": {
+    "x": 0.4791666666666667,
+    "y": 0.5203405865657521,
+    "width": 0.041666666666666664,
+    "height": 0.041627246925260174,
+    "configured": true
+  },
+  "title": {
+    "target_text": "咬钩！",
+    "preprocess_scale": 3,
+    "ocr_similarity_threshold": 0.8,
+    "ocr_confidence_threshold": 0.65,
+    "title_confirm_frames": 2,
+    "title_confirm_window_ms": 900,
+    "title_candidate_timeout": 1200,
+    "bite_cooldown": 2000,
+    "clear_frames": 2,
+    "screenshot_interval_ms": 80,
+    "min_wait_ms": 600
+  },
+  "fishing": {
+    "recast_delay_min_ms": 1000,
+    "recast_delay_max_ms": 2500,
+    "result_timeout": 6000,
+    "stop_on_unknown": false,
+    "initial_cast": false
+  },
+  "game_log": {
+    "enabled": true,
+    "path": "C:/MCLDownload/Game/.minecraft/logs/latest.log",
+    "extra_errors": {}
+  },
+  "alert": {
+    "alert_enabled": true,
+    "sound_enabled": true,
+    "sound_frequency": 880,
+    "sound_duration_ms": 350,
+    "repeat_interval_ms": 3000
+  },
+  "bobber": {
+    "enabled": false,
+    "roi": {
+      "x": 0.35,
+      "y": 0.35,
+      "width": 0.3,
+      "height": 0.2,
+      "configured": false
+    },
+    "motion_threshold": 0.06
+  },
+  "hotkeys": {
+    "toggle": "f6",
+    "stop": "f7",
+    "select_region": "f8",
+    "test": "f9",
+    "capture_template": "f10",
+    "pick_color": "f11"
+  },
+  "user_activity": {
+    "enabled": true,
+    "threshold_ms": 1500,
+    "poll_interval_ms": 80
+  },
+  "ui": {
+    "window_geometry": "1060x751+2450+197"
+  }
+}

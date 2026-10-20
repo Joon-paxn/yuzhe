@@ -1,0 +1,88 @@
+{
+  "text": "咬钩！",
+  "confidence": 0.99695,
+  "similarity": 1.0,
+  "matched": true,
+  "roi": [
+    0,
+    0,
+    460,
+    150
+  ],
+  "reason": "BITE_CONFIRMED",
+  "normalized": "咬钩",
+  "target": "咬钩",
+  "best_variant": "inverted",
+  "support_count": 7,
+  "detection_state": "BITE_CONFIRMED",
+  "variants": [
+    {
+      "name": "enlarged",
+      "text": "咬钩！",
+      "confidence": 0.99384,
+      "normalized": "咬钩",
+      "target": "咬钩",
+      "similarity": 1.0,
+      "matched": true
+    },
+    {
+      "name": "grayscale",
+      "text": "咬钩！",
+      "confidence": 0.99382,
+      "normalized": "咬钩",
+      "target": "咬钩",
+      "similarity": 1.0,
+      "matched": true
+    },
+    {
+      "name": "contrast",
+      "text": "咬钩！",
+      "confidence": 0.99518,
+      "normalized": "咬钩",
+      "target": "咬钩",
+      "similarity": 1.0,
+      "matched": true
+    },
+    {
+      "name": "sharpened",
+      "text": "咬钩！",
+      "confidence": 0.99569,
+      "normalized": "咬钩",
+      "target": "咬钩",
+      "similarity": 1.0,
+      "matched": true
+    },
+    {
+      "name": "binary",
+      "text": "咬钩！",
+      "confidence": 0.99658,
+      "normalized": "咬钩",
+      "target": "咬钩",
+      "similarity": 1.0,
+      "matched": true
+    },
+    {
+      "name": "inverted",
+      "text": "咬钩！",
+      "confidence": 0.99695,
+      "normalized": "咬钩",
+      "target": "咬钩",
+      "similarity": 1.0,
+      "matched": true
+    },
+    {
+      "name": "white_text",
+      "text": "咬钩！",
+      "confidence": 0.99548,
+      "normalized": "咬钩",
+      "target": "咬钩",
+      "similarity": 1.0,
+      "matched": true
+    }
+  ],
+  "confirmation_states": [
+    "BITE_CANDIDATE",
+    "BITE_CONFIRMED"
+  ],
+  "latency_ms": 235.0503999987268
+}
